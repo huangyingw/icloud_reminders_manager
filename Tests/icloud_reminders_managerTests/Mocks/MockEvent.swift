@@ -2,40 +2,79 @@ import Foundation
 import EventKit
 
 class MockEvent: EKEvent {
-    private var mockTitle: String = ""
-    private var mockStartDate: Date = Date()
-    private var mockEndDate: Date = Date()
-    private var mockCalendar: EKCalendar?
-    private var mockNotes: String?
-    private var mockURL: URL?
+    var mockTitle: String?
+    var mockStartDate: Date!
+    var mockEndDate: Date!
+    var mockNotes: String?
+    var mockURL: URL?
+    var mockLocation: String?
+    var mockCalendar: EKCalendar?
+    var mockAlarms: [EKAlarm]?
+    var mockAttendees: [EKParticipant]?
+    var mockRecurrenceRules: [EKRecurrenceRule]?
     
-    override var title: String! {
-        get { return mockTitle }
-        set { mockTitle = newValue ?? "" }
+    override var title: String? {
+        get { mockTitle }
+        set { mockTitle = newValue }
     }
     
     override var startDate: Date! {
-        get { return mockStartDate }
-        set { mockStartDate = newValue ?? Date() }
+        get { mockStartDate }
+        set { mockStartDate = newValue }
     }
     
     override var endDate: Date! {
-        get { return mockEndDate }
-        set { mockEndDate = newValue ?? Date() }
-    }
-    
-    override var calendar: EKCalendar? {
-        get { return mockCalendar }
-        set { mockCalendar = newValue }
+        get { mockEndDate }
+        set { mockEndDate = newValue }
     }
     
     override var notes: String? {
-        get { return mockNotes }
+        get { mockNotes }
         set { mockNotes = newValue }
     }
     
     override var url: URL? {
-        get { return mockURL }
+        get { mockURL }
         set { mockURL = newValue }
+    }
+    
+    override var location: String? {
+        get { mockLocation }
+        set { mockLocation = newValue }
+    }
+    
+    override var calendar: EKCalendar? {
+        get { mockCalendar }
+        set { mockCalendar = newValue }
+    }
+    
+    override var alarms: [EKAlarm]? {
+        get { mockAlarms }
+        set { mockAlarms = newValue }
+    }
+    
+    override var attendees: [EKParticipant]? {
+        get { mockAttendees }
+        set { mockAttendees = newValue }
+    }
+    
+    override var recurrenceRules: [EKRecurrenceRule]? {
+        get { mockRecurrenceRules }
+        set { mockRecurrenceRules = newValue }
+    }
+    
+    override func addAlarm(_ alarm: EKAlarm) {
+        if mockAlarms == nil {
+            mockAlarms = []
+        }
+        mockAlarms?.append(alarm)
+    }
+    
+    override func removeAlarm(_ alarm: EKAlarm) {
+        mockAlarms?.removeAll { $0 === alarm }
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 } 

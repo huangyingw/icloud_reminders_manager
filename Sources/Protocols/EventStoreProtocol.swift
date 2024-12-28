@@ -2,19 +2,25 @@ import Foundation
 import EventKit
 
 protocol EventStoreProtocol {
-    var defaultCalendarForNewEvents: EKCalendar? { get }
-    var defaultCalendarForNewReminders: EKCalendar? { get }
-    var sources: [EKSource] { get }
-    
     func requestAccess(to entityType: EKEntityType) async throws -> Bool
     func fetchReminders(matching predicate: NSPredicate, completion: @escaping ([EKReminder]?) -> Void) -> Any
     func events(matching predicate: NSPredicate) -> [EKEvent]
+    var sources: [EKSource] { get }
+    var defaultCalendarForNewEvents: EKCalendar? { get }
+    var defaultCalendarForNewReminders: EKCalendar? { get }
     func save(_ object: EKCalendarItem, commit: Bool) throws
     func remove(_ object: EKCalendarItem, commit: Bool) throws
     func saveCalendar(_ calendar: EKCalendar, commit: Bool) throws
     func removeCalendar(_ calendar: EKCalendar, commit: Bool) throws
     func calendar(withIdentifier identifier: String) -> EKCalendar?
     func calendarItem(withIdentifier identifier: String) -> EKCalendarItem?
+    func save(_ event: EKEvent, span: EKSpan, commit: Bool) throws
+    func save(_ reminder: EKReminder, commit: Bool) throws
+    func remove(_ event: EKEvent, span: EKSpan, commit: Bool) throws
+    func remove(_ reminder: EKReminder, commit: Bool) throws
+    func predicateForEvents(withStart startDate: Date, end endDate: Date, calendars: [EKCalendar]?) -> NSPredicate
+    func predicateForIncompleteReminders(withDueDateStarting startDate: Date?, ending endDate: Date?, calendars: [EKCalendar]?) -> NSPredicate
+    func predicateForReminders(in calendars: [EKCalendar]?) -> NSPredicate
 }
 
 extension EKEventStore: EventStoreProtocol {

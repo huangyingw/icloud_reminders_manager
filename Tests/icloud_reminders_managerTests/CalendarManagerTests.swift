@@ -18,8 +18,7 @@ final class CalendarManagerTests: XCTestCase {
         eventStore.mockSources = [mockSource]
         
         // Setup calendar
-        let store = EKEventStore()
-        defaultCalendar = EKCalendar(for: .event, eventStore: store)
+        defaultCalendar = EKCalendar(for: .event, eventStore: eventStore)
         defaultCalendar.source = mockSource
         defaultCalendar.title = "Test Calendar"
         try eventStore.saveCalendar(defaultCalendar, commit: true)
@@ -33,52 +32,46 @@ final class CalendarManagerTests: XCTestCase {
     }
     
     func testRequestAccess() async throws {
-        let hasAccess = try await calendarManager.requestAccess()
-        XCTAssertTrue(hasAccess, "Should have access to calendar")
+        let granted = try await calendarManager.requestAccess()
+        XCTAssertTrue(granted)
         
-        // Test denied access
         eventStore.shouldGrantAccess = false
-        let noAccess = try await calendarManager.requestAccess()
-        XCTAssertFalse(noAccess, "Should not have access to calendar")
+        let denied = try await calendarManager.requestAccess()
+        XCTAssertFalse(denied)
     }
     
     func testCreateEventFromReminder() async throws {
-        // Create test data
-        let dueDate = Date()
-        let reminder = createTestReminder(withTitle: "Test Event", dueDate: dueDate)
-        let reminderModel = Reminder(from: reminder)
+        let reminder = createTestReminder(withTitle: "Test Reminder", dueDate: Date())
+        let event = try await calendarManager.createEventFromReminder(reminder)
         
-        // Create event
-        let event = try calendarManager.createEvent(from: reminderModel, in: defaultCalendar)
-        
-        // Verify
-        XCTAssertEqual(event.title, reminderModel.title)
-        XCTAssertEqual(event.startDate, reminderModel.dueDate)
-        XCTAssertEqual(eventStore.mockEvents.count, 1)
+        XCTAssertEqual(event.title, reminder.title)
+        XCTAssertEqual(event.startDate, reminder.dueDateComponents?.date)
+        XCTAssertEqual(event.notes, reminder.notes)
+        XCTAssertEqual(event.calendar, defaultCalendar)
         
         // Cleanup
-        try eventStore.remove(event, commit: true)
-        XCTAssertEqual(eventStore.mockEvents.count, 0)
+        try eventStore.remove(event, span: .thisEvent)
+        try eventStore.remove(reminder, commit: true)
     }
     
     func testMoveEventToCurrentWeek() async throws {
-        // Create a test event from last week
+        let now = Date()
+        let nextWeek = Calendar.current.date(byAdding: .weekOfYear, value: 1, to: now)!
+        
+        let event = createTestEvent(withTitle: "Future Meeting", startDate: nextWeek)
+        try eventStore.save(event, span: .thisEvent)
+        
+        let movedEvent = try await calendarManager.moveEventToCurrentWeek(event)
+        
+        // Verify the event was moved to the current week
         let calendar = Calendar.current
-        let lastWeek = calendar.date(byAdding: .day, value: -7, to: Date())!
-        let event = createTestEvent(withTitle: "Past Event", startDate: lastWeek)
-        
-        // Move event
-        try calendarManager.moveEventToCurrentWeek(event)
-        
-        // Verify the event was moved to current week
-        let currentWeekStart = calendar.startOfWeek(for: Date())
-        let currentWeekEnd = calendar.date(byAdding: .day, value: 7, to: currentWeekStart)!
-        
-        XCTAssertTrue(event.startDate >= currentWeekStart)
-        XCTAssertTrue(event.startDate < currentWeekEnd)
+        XCTAssertEqual(calendar.component(.weekOfYear, from: movedEvent.startDate),
+                      calendar.component(.weekOfYear, from: now))
+        XCTAssertEqual(calendar.component(.year, from: movedEvent.startDate),
+                      calendar.component(.year, from: now))
         
         // Cleanup
-        try eventStore.remove(event, commit: true)
+        try eventStore.remove(movedEvent, span: .thisEvent)
     }
     
     // MARK: - Helper Methods
@@ -87,7 +80,8 @@ final class CalendarManagerTests: XCTestCase {
         let reminder = eventStore.createMockReminder()
         reminder.title = title
         reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: dueDate)
-        reminder.calendar = eventStore.defaultCalendarForNewReminders
+        reminder.calendar = defaultCalendar
+        try? eventStore.save(reminder, commit: true)
         return reminder
     }
     

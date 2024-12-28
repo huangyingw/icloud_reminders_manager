@@ -2,9 +2,9 @@ import Foundation
 import EventKit
 
 class CalendarManager {
-    private let eventStore: EventStoreProtocol
+    private let eventStore: EKEventStore
     
-    init(eventStore: EventStoreProtocol = EKEventStore()) {
+    init(eventStore: EKEventStore) {
         self.eventStore = eventStore
     }
     
@@ -12,66 +12,38 @@ class CalendarManager {
         return try await eventStore.requestAccess(to: .event)
     }
     
-    func createEvent(from reminder: Reminder, in calendar: EKCalendar) throws -> EKEvent {
-        guard let dueDate = reminder.dueDate else {
-            throw CalendarError.missingDueDate
-        }
-        
-        let store = EKEventStore()
-        let event = EKEvent(eventStore: store)
-        event.calendar = calendar
+    func createEventFromReminder(_ reminder: EKReminder) async throws -> EKEvent {
+        let event = EKEvent(eventStore: eventStore)
         event.title = reminder.title
         event.notes = reminder.notes
-        event.startDate = dueDate
-        event.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: dueDate) ?? dueDate
+        event.calendar = reminder.calendar
         
-        // Set URL
-        if let url = reminder.url {
-            event.url = url
+        if let dueDate = reminder.dueDateComponents?.date {
+            event.startDate = dueDate
+            event.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: dueDate)!
+        } else {
+            event.startDate = Date()
+            event.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: event.startDate)!
         }
         
-        // Save the event
-        do {
-            try eventStore.save(event, commit: true)
-        } catch let error as NSError {
-            if error.domain == EKErrorDomain && error.code == 40 {
-                // Ignore alarm-related errors
-                return event
-            }
-            throw error
-        }
+        try eventStore.save(event, span: .thisEvent)
         return event
     }
     
-    func fetchExpiredEvents() throws -> [EKEvent] {
-        let now = Date()
-        let calendar = Calendar.current
-        let startDate = calendar.date(byAdding: .year, value: -1, to: now)!
-        let endDate = now
-        
-        let predicate = EKEventStore().predicateForEvents(withStart: startDate,
-                                                    end: endDate,
-                                                    calendars: nil)
-        return eventStore.events(matching: predicate)
-    }
-    
-    func moveEventToCurrentWeek(_ event: EKEvent) throws {
+    func moveEventToCurrentWeek(_ event: EKEvent) async throws -> EKEvent {
         let calendar = Calendar.current
         let now = Date()
-        let weekday = calendar.component(.weekday, from: event.startDate)
-        let hour = calendar.component(.hour, from: event.startDate)
-        let minute = calendar.component(.minute, from: event.startDate)
+        let currentWeekStart = calendar.startOfWeek(for: now)
         
-        // Find the next occurrence of the same weekday in the current week
-        var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)
-        components.weekday = weekday
-        components.hour = hour
-        components.minute = minute
+        // Calculate the day of week for both dates
+        let eventDayOfWeek = calendar.component(.weekday, from: event.startDate)
+        let targetDayOfWeek = calendar.component(.weekday, from: currentWeekStart)
         
-        guard let newStartDate = calendar.date(from: components) else {
-            throw CalendarError.dateCalculationError
-        }
+        // Calculate the difference in days needed to move the event
+        let daysDifference = eventDayOfWeek - targetDayOfWeek
         
+        // Create new dates for the event in the current week
+        let newStartDate = calendar.date(byAdding: .day, value: daysDifference, to: currentWeekStart)!
         let duration = event.endDate.timeIntervalSince(event.startDate)
         let newEndDate = newStartDate.addingTimeInterval(duration)
         
@@ -79,24 +51,14 @@ class CalendarManager {
         event.startDate = newStartDate
         event.endDate = newEndDate
         
-        // Save the event
-        do {
-            try eventStore.save(event, commit: true)
-        } catch let error as NSError {
-            if error.domain == EKErrorDomain && error.code == 40 {
-                // Ignore alarm-related errors
-                return
-            }
-            throw error
-        }
-    }
-    
-    func deleteEvent(_ event: EKEvent) throws {
-        try eventStore.remove(event, commit: true)
+        try eventStore.save(event, span: .thisEvent)
+        return event
     }
 }
 
-enum CalendarError: Error {
-    case missingDueDate
-    case dateCalculationError
+extension Calendar {
+    func startOfWeek(for date: Date) -> Date {
+        let components = self.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+        return self.date(from: components)!
+    }
 } 

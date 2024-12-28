@@ -9,10 +9,6 @@ class MockSource: EKSource {
         super.init()
     }
     
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
     override var sourceType: EKSourceType {
         return mockSourceType
     }

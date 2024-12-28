@@ -65,6 +65,40 @@ class EventMerger {
         }
         primary.notes = mergedNotes
         
+        // Merge recurrence rules
+        if let primaryRules = primary.recurrenceRules, !primaryRules.isEmpty || duplicates.contains(where: { $0.recurrenceRules?.isEmpty == false }) {
+            var recurrenceInfo = "Original Recurrence Rules:\n"
+            if let rules = primary.recurrenceRules, !rules.isEmpty {
+                recurrenceInfo += describeRecurrenceRule(rules[0], eventTitle: primary.title ?? "Primary Event")
+            }
+            
+            for event in duplicates {
+                if let rules = event.recurrenceRules, !rules.isEmpty {
+                    if !recurrenceInfo.isEmpty {
+                        recurrenceInfo += "\n"
+                    }
+                    recurrenceInfo += describeRecurrenceRule(rules[0], eventTitle: event.title ?? "Duplicate Event")
+                }
+            }
+            
+            // Keep the most frequent recurrence rule (smallest interval)
+            var bestRule = primary.recurrenceRules?.first
+            for event in duplicates {
+                if let rule = event.recurrenceRules?.first {
+                    if bestRule == nil || rule.interval < bestRule!.interval {
+                        bestRule = rule
+                    }
+                }
+            }
+            primary.recurrenceRules = bestRule.map { [$0] }
+            
+            // Add recurrence information to notes
+            if !mergedNotes.isEmpty {
+                mergedNotes += "\n\n"
+            }
+            mergedNotes += recurrenceInfo
+        }
+        
         // Merge URLs
         var urls: [URL] = []
         if let primaryUrl = primary.url {
@@ -159,6 +193,46 @@ class EventMerger {
     }
     
     // MARK: - Helper Methods
+    
+    private func describeRecurrenceRule(_ rule: EKRecurrenceRule, eventTitle: String) -> String {
+        var description = "\(eventTitle):\n"
+        description += "- Frequency: \(frequencyToString(rule.frequency))\n"
+        description += "- Interval: \(rule.interval)"
+        
+        if let end = rule.recurrenceEnd {
+            if let endDate = end.endDate {
+                description += "\n- Ends: \(formatDate(endDate))"
+            } else {
+                description += "\n- Occurrences: \(end.occurrenceCount)"
+            }
+        } else {
+            description += "\n- No end date"
+        }
+        
+        return description
+    }
+    
+    private func frequencyToString(_ frequency: EKRecurrenceFrequency) -> String {
+        switch frequency {
+        case .daily:
+            return "Daily"
+        case .weekly:
+            return "Weekly"
+        case .monthly:
+            return "Monthly"
+        case .yearly:
+            return "Yearly"
+        @unknown default:
+            return "Unknown"
+        }
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
     
     private func levenshteinDistance(_ s1: String, _ s2: String) -> Int {
         let s1 = Array(s1.lowercased())

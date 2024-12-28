@@ -18,8 +18,7 @@ final class EventMergerTests: XCTestCase {
         eventStore.mockSources = [mockSource]
         
         // Setup calendar
-        let store = EKEventStore()
-        defaultCalendar = EKCalendar(for: .event, eventStore: store)
+        defaultCalendar = EKCalendar(for: .event, eventStore: eventStore)
         defaultCalendar.source = mockSource
         defaultCalendar.title = "Test Calendar"
         try eventStore.saveCalendar(defaultCalendar, commit: true)
@@ -51,9 +50,9 @@ final class EventMergerTests: XCTestCase {
         }
         
         // Cleanup
-        try eventStore.remove(event1, commit: true)
-        try eventStore.remove(event2, commit: true)
-        try eventStore.remove(event3, commit: true)
+        try eventStore.remove(event1, span: .thisEvent, commit: true)
+        try eventStore.remove(event2, span: .thisEvent, commit: true)
+        try eventStore.remove(event3, span: .thisEvent, commit: true)
         XCTAssertEqual(eventStore.mockEvents.count, 0)
     }
     
@@ -77,8 +76,8 @@ final class EventMergerTests: XCTestCase {
         XCTAssertNotNil(merged.url)
         
         // Cleanup
-        try eventStore.remove(primary, commit: true)
-        try eventStore.remove(duplicate, commit: true)
+        try eventStore.remove(primary, span: .thisEvent, commit: true)
+        try eventStore.remove(duplicate, span: .thisEvent, commit: true)
         XCTAssertEqual(eventStore.mockEvents.count, 0)
     }
     
@@ -101,9 +100,9 @@ final class EventMergerTests: XCTestCase {
         }
         
         // Cleanup
-        try eventStore.remove(event1, commit: true)
-        try eventStore.remove(event2, commit: true)
-        try eventStore.remove(event3, commit: true)
+        try eventStore.remove(event1, span: .thisEvent, commit: true)
+        try eventStore.remove(event2, span: .thisEvent, commit: true)
+        try eventStore.remove(event3, span: .thisEvent, commit: true)
         XCTAssertEqual(eventStore.mockEvents.count, 0)
     }
     
@@ -128,8 +127,8 @@ final class EventMergerTests: XCTestCase {
         XCTAssertTrue(merged.alarms?.contains { $0.relativeOffset == -1800 } ?? false)
         
         // Cleanup
-        try eventStore.remove(primary, commit: true)
-        try eventStore.remove(duplicate, commit: true)
+        try eventStore.remove(primary, span: .thisEvent, commit: true)
+        try eventStore.remove(duplicate, span: .thisEvent, commit: true)
     }
     
     func testMergeEventsWithDifferentLocations() async throws {
@@ -151,8 +150,8 @@ final class EventMergerTests: XCTestCase {
         XCTAssertTrue(merged.notes?.contains("Room B") ?? false)
         
         // Cleanup
-        try eventStore.remove(primary, commit: true)
-        try eventStore.remove(duplicate, commit: true)
+        try eventStore.remove(primary, span: .thisEvent, commit: true)
+        try eventStore.remove(duplicate, span: .thisEvent, commit: true)
     }
     
     func testMergeEventsWithDifferentURLs() async throws {
@@ -174,8 +173,8 @@ final class EventMergerTests: XCTestCase {
         XCTAssertTrue(merged.notes?.contains("https://example2.com") ?? false)
         
         // Cleanup
-        try eventStore.remove(primary, commit: true)
-        try eventStore.remove(duplicate, commit: true)
+        try eventStore.remove(primary, span: .thisEvent, commit: true)
+        try eventStore.remove(duplicate, span: .thisEvent, commit: true)
     }
     
     func testMergeEventsWithOverlappingTimes() async throws {
@@ -199,8 +198,51 @@ final class EventMergerTests: XCTestCase {
         XCTAssertLessThan(endDiff, 1.0, "End dates should be within 1 second")
         
         // Cleanup
-        try eventStore.remove(primary, commit: true)
-        try eventStore.remove(duplicate, commit: true)
+        try eventStore.remove(primary, span: .thisEvent, commit: true)
+        try eventStore.remove(duplicate, span: .thisEvent, commit: true)
+    }
+    
+    func testMergeEventsWithRecurrence() async throws {
+        let now = Date()
+        
+        // Create test events with recurrence rules
+        let primary = createTestEvent(withTitle: "Weekly Meeting", startDate: now)
+        let recurrenceRule = EKRecurrenceRule(
+            recurrenceWith: .weekly,
+            interval: 1,
+            end: nil
+        )
+        primary.recurrenceRules = [recurrenceRule]
+        try eventStore.save(primary, span: .thisEvent, commit: true)
+        
+        let duplicate = createTestEvent(withTitle: "Weekly Meeting", startDate: now)
+        let duplicateRule = EKRecurrenceRule(
+            recurrenceWith: .weekly,
+            interval: 2,
+            end: EKRecurrenceEnd(occurrenceCount: 10)
+        )
+        duplicate.recurrenceRules = [duplicateRule]
+        try eventStore.save(duplicate, span: .thisEvent, commit: true)
+        
+        let merged = eventMerger.mergeEvents(primary, with: [duplicate])
+        try eventStore.save(merged, span: .thisEvent, commit: true)
+        
+        // Verify merged recurrence rules
+        XCTAssertNotNil(merged.recurrenceRules, "Merged event should have recurrence rules")
+        XCTAssertEqual(merged.recurrenceRules?.count, 1, "Should have one recurrence rule")
+        XCTAssertEqual(merged.recurrenceRules?.first?.frequency, .weekly, "Should keep weekly frequency")
+        XCTAssertEqual(merged.recurrenceRules?.first?.interval, 1, "Should keep the shorter interval")
+        XCTAssertNil(merged.recurrenceRules?.first?.recurrenceEnd, "Should keep the rule without end")
+        
+        // Verify notes contain information about the original recurrence rules
+        XCTAssertTrue(merged.notes?.contains("Weekly") ?? false)
+        XCTAssertTrue(merged.notes?.contains("interval: 1") ?? false)
+        XCTAssertTrue(merged.notes?.contains("interval: 2") ?? false)
+        XCTAssertTrue(merged.notes?.contains("occurrences: 10") ?? false)
+        
+        // Cleanup
+        try eventStore.remove(primary, span: .thisEvent, commit: true)
+        try eventStore.remove(duplicate, span: .thisEvent, commit: true)
     }
     
     // MARK: - Helper Methods
@@ -211,6 +253,7 @@ final class EventMergerTests: XCTestCase {
         event.startDate = startDate
         event.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: startDate)!
         event.calendar = defaultCalendar
+        try? eventStore.save(event, span: .thisEvent, commit: true)
         return event
     }
 } 

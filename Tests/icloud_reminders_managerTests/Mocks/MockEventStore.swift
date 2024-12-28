@@ -1,120 +1,91 @@
 import Foundation
 import EventKit
-@testable import icloud_reminders_manager
 
-class MockEventStore: EventStoreProtocol {
+class MockEventStore: EKEventStore {
     var shouldGrantAccess = true
-    var mockReminders: [EKReminder] = []
     var mockEvents: [EKEvent] = []
-    var mockCalendars: [EKCalendar] = []
+    var mockReminders: [EKReminder] = []
     var mockSources: [EKSource] = []
-    private var nextEventId = 1
-    private var nextReminderId = 1
-    private var eventIdentifiers: [EKEvent: String] = [:]
-    private var reminderIdentifiers: [EKReminder: String] = [:]
+    var mockCalendars: [EKCalendar] = []
     
-    func requestAccess(to entityType: EKEntityType) async throws -> Bool {
+    override func requestAccess(to entityType: EKEntityType) async throws -> Bool {
         return shouldGrantAccess
     }
     
-    func fetchReminders(matching predicate: NSPredicate, completion: @escaping ([EKReminder]?) -> Void) -> Any {
-        completion(mockReminders)
-        return NSObject()
+    override func calendars(for entityType: EKEntityType) -> [EKCalendar] {
+        return mockCalendars
     }
     
-    func events(matching predicate: NSPredicate) -> [EKEvent] {
-        return mockEvents
-    }
-    
-    var sources: [EKSource] {
+    override var sources: [EKSource] {
         return mockSources
     }
     
-    var defaultCalendarForNewEvents: EKCalendar? {
-        return mockCalendars.first(where: { $0.allowedEntityTypes.contains(.event) })
-    }
-    
-    var defaultCalendarForNewReminders: EKCalendar? {
-        return mockCalendars.first(where: { $0.allowedEntityTypes.contains(.reminder) })
-    }
-    
-    func save(_ object: EKCalendarItem, commit: Bool) throws {
-        if let reminder = object as? EKReminder {
-            if !mockReminders.contains(where: { $0 === reminder }) {
-                reminderIdentifiers[reminder] = "reminder-\(nextReminderId)"
-                nextReminderId += 1
-                mockReminders.append(reminder)
-            }
-        } else if let event = object as? EKEvent {
-            if !mockEvents.contains(where: { $0 === event }) {
-                eventIdentifiers[event] = "event-\(nextEventId)"
-                nextEventId += 1
-                mockEvents.append(event)
-            }
+    override func save(_ event: EKEvent, span: EKSpan, commit: Bool) throws {
+        if !mockEvents.contains(where: { $0 === event }) {
+            mockEvents.append(event)
+        }
+        
+        // Update existing event if it exists
+        if let index = mockEvents.firstIndex(where: { $0 === event }) {
+            mockEvents[index] = event
         }
     }
     
-    func remove(_ object: EKCalendarItem, commit: Bool) throws {
-        if let reminder = object as? EKReminder {
-            mockReminders.removeAll { $0 === reminder }
-            reminderIdentifiers.removeValue(forKey: reminder)
-        } else if let event = object as? EKEvent {
-            mockEvents.removeAll { $0 === event }
-            eventIdentifiers.removeValue(forKey: event)
-        }
+    override func remove(_ event: EKEvent, span: EKSpan, commit: Bool) throws {
+        mockEvents.removeAll { $0 === event }
     }
     
-    func saveCalendar(_ calendar: EKCalendar, commit: Bool) throws {
+    override func saveCalendar(_ calendar: EKCalendar, commit: Bool) throws {
         if !mockCalendars.contains(where: { $0 === calendar }) {
             mockCalendars.append(calendar)
         }
     }
     
-    func removeCalendar(_ calendar: EKCalendar, commit: Bool) throws {
+    override func removeCalendar(_ calendar: EKCalendar, commit: Bool) throws {
         mockCalendars.removeAll { $0 === calendar }
     }
     
-    func calendar(withIdentifier identifier: String) -> EKCalendar? {
-        return mockCalendars.first(where: { $0.calendarIdentifier == identifier })
-    }
-    
-    func calendarItem(withIdentifier identifier: String) -> EKCalendarItem? {
-        if let event = mockEvents.first(where: { eventIdentifiers[$0] == identifier }) {
-            return event
-        }
-        return mockReminders.first(where: { reminderIdentifiers[$0] == identifier })
-    }
-    
     func createMockEvent() -> EKEvent {
-        let store = EKEventStore()
-        let event = EKEvent(eventStore: store)
-        event.calendar = defaultCalendarForNewEvents
-        eventIdentifiers[event] = "event-\(nextEventId)"
-        nextEventId += 1
-        try? save(event, commit: true)
+        let event = EKEvent(eventStore: self)
+        event.startDate = Date()
+        event.endDate = Date()
         return event
     }
     
     func createMockReminder() -> EKReminder {
-        let store = EKEventStore()
-        let reminder = EKReminder(eventStore: store)
-        reminder.calendar = defaultCalendarForNewReminders
-        reminderIdentifiers[reminder] = "reminder-\(nextReminderId)"
-        nextReminderId += 1
-        try? save(reminder, commit: true)
+        let reminder = EKReminder(eventStore: self)
+        mockReminders.append(reminder)
         return reminder
     }
     
-    func getEventIdentifier(_ event: EKEvent) -> String? {
-        return eventIdentifiers[event]
+    override func fetchReminders(matching predicate: NSPredicate, completion: @escaping ([EKReminder]?) -> Void) -> Any {
+        completion(mockReminders)
+        return NSObject()
     }
     
-    func getCalendarItemIdentifier(_ item: EKCalendarItem) -> String? {
-        if let event = item as? EKEvent {
-            return eventIdentifiers[event]
-        } else if let reminder = item as? EKReminder {
-            return reminderIdentifiers[reminder]
+    override func save(_ reminder: EKReminder, commit: Bool) throws {
+        if !mockReminders.contains(where: { $0 === reminder }) {
+            mockReminders.append(reminder)
         }
-        return nil
+    }
+    
+    override func remove(_ reminder: EKReminder, commit: Bool) throws {
+        mockReminders.removeAll { $0 === reminder }
+    }
+    
+    override func predicateForEvents(withStart startDate: Date, end endDate: Date, calendars: [EKCalendar]?) -> NSPredicate {
+        return NSPredicate(value: true)
+    }
+    
+    override func predicateForIncompleteReminders(withDueDateStarting startDate: Date?, ending endDate: Date?, calendars: [EKCalendar]?) -> NSPredicate {
+        return NSPredicate(value: true)
+    }
+    
+    override func predicateForReminders(in calendars: [EKCalendar]?) -> NSPredicate {
+        return NSPredicate(value: true)
+    }
+    
+    override func events(matching predicate: NSPredicate) -> [EKEvent] {
+        return mockEvents
     }
 } 
