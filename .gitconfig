@@ -1,3 +1,5 @@
 [deploy]
 	host = localhost
 	path = ~/loadrc/icloud_reminders_manager
+[push]
+    remote = origin
