@@ -79,14 +79,81 @@ class EventMerger {
         if urls.count > 1 {
             // If multiple URLs exist, add them to notes
             let urlsString = urls.map { $0.absoluteString }.joined(separator: "\n")
-            if !primary.notes!.isEmpty {
-                primary.notes! += "\n\n"
+            if !mergedNotes.isEmpty {
+                mergedNotes += "\n\n"
             }
-            primary.notes! += "URLs:\n" + urlsString
+            mergedNotes += "URLs:\n" + urlsString
             primary.url = urls.first
         } else if !urls.isEmpty {
             primary.url = urls.first
         }
+        
+        // Merge alarms
+        var alarms = Set(primary.alarms ?? [])
+        for event in duplicates {
+            if let eventAlarms = event.alarms {
+                alarms.formUnion(eventAlarms)
+            }
+        }
+        primary.alarms = Array(alarms)
+        
+        // Add attendee information to notes since we can't modify attendees directly
+        var attendeeNotes = ""
+        if let primaryAttendees = primary.attendees, !primaryAttendees.isEmpty {
+            attendeeNotes = "Attendees:\n" + primaryAttendees.map { $0.name ?? "Unknown" }.joined(separator: "\n")
+        }
+        for event in duplicates {
+            if let eventAttendees = event.attendees, !eventAttendees.isEmpty {
+                if !attendeeNotes.isEmpty {
+                    attendeeNotes += "\n"
+                } else {
+                    attendeeNotes = "Attendees:\n"
+                }
+                attendeeNotes += eventAttendees.map { $0.name ?? "Unknown" }.joined(separator: "\n")
+            }
+        }
+        if !attendeeNotes.isEmpty {
+            if !mergedNotes.isEmpty {
+                mergedNotes += "\n\n"
+            }
+            mergedNotes += attendeeNotes
+        }
+        
+        // Merge locations
+        var locations: [String] = []
+        if let primaryLocation = primary.location, !primaryLocation.isEmpty {
+            locations.append(primaryLocation)
+        }
+        for event in duplicates {
+            if let location = event.location, !location.isEmpty, !locations.contains(location) {
+                locations.append(location)
+            }
+        }
+        
+        if locations.count > 1 {
+            // If multiple locations exist, add them to notes
+            let locationsString = locations.joined(separator: "\n")
+            if !mergedNotes.isEmpty {
+                mergedNotes += "\n\n"
+            }
+            mergedNotes += "Locations:\n" + locationsString
+            primary.location = locations.first
+        } else if !locations.isEmpty {
+            primary.location = locations.first
+        }
+        
+        // Keep the earliest start date and latest end date
+        for event in duplicates {
+            if event.startDate < primary.startDate {
+                primary.startDate = event.startDate
+            }
+            if event.endDate > primary.endDate {
+                primary.endDate = event.endDate
+            }
+        }
+        
+        // Update the final notes
+        primary.notes = mergedNotes
         
         return primary
     }

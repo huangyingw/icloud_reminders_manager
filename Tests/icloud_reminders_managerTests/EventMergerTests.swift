@@ -107,6 +107,102 @@ final class EventMergerTests: XCTestCase {
         XCTAssertEqual(eventStore.mockEvents.count, 0)
     }
     
+    func testMergeEventsWithDifferentAlarms() async throws {
+        let now = Date()
+        
+        // Create test events with different alarms
+        let primary = createTestEvent(withTitle: "Meeting", startDate: now)
+        let alarm1 = EKAlarm(relativeOffset: -900) // 15 minutes before
+        primary.addAlarm(alarm1)
+        
+        let duplicate = createTestEvent(withTitle: "Meeting", startDate: now)
+        let alarm2 = EKAlarm(relativeOffset: -1800) // 30 minutes before
+        duplicate.addAlarm(alarm2)
+        
+        eventStore.mockEvents = [primary, duplicate]
+        let merged = eventMerger.mergeEvents(primary, with: [duplicate])
+        
+        // Verify merged alarms
+        XCTAssertEqual(merged.alarms?.count, 2, "Should have both alarms")
+        XCTAssertTrue(merged.alarms?.contains { $0.relativeOffset == -900 } ?? false)
+        XCTAssertTrue(merged.alarms?.contains { $0.relativeOffset == -1800 } ?? false)
+        
+        // Cleanup
+        try eventStore.remove(primary, commit: true)
+        try eventStore.remove(duplicate, commit: true)
+    }
+    
+    func testMergeEventsWithDifferentLocations() async throws {
+        let now = Date()
+        
+        // Create test events with different locations
+        let primary = createTestEvent(withTitle: "Meeting", startDate: now)
+        primary.location = "Room A"
+        
+        let duplicate = createTestEvent(withTitle: "Meeting", startDate: now)
+        duplicate.location = "Room B"
+        
+        eventStore.mockEvents = [primary, duplicate]
+        let merged = eventMerger.mergeEvents(primary, with: [duplicate])
+        
+        // Verify merged locations
+        XCTAssertEqual(merged.location, "Room A", "Should keep primary location")
+        XCTAssertTrue(merged.notes?.contains("Room A") ?? false)
+        XCTAssertTrue(merged.notes?.contains("Room B") ?? false)
+        
+        // Cleanup
+        try eventStore.remove(primary, commit: true)
+        try eventStore.remove(duplicate, commit: true)
+    }
+    
+    func testMergeEventsWithDifferentURLs() async throws {
+        let now = Date()
+        
+        // Create test events with different URLs
+        let primary = createTestEvent(withTitle: "Meeting", startDate: now)
+        primary.url = URL(string: "https://example1.com")!
+        
+        let duplicate = createTestEvent(withTitle: "Meeting", startDate: now)
+        duplicate.url = URL(string: "https://example2.com")!
+        
+        eventStore.mockEvents = [primary, duplicate]
+        let merged = eventMerger.mergeEvents(primary, with: [duplicate])
+        
+        // Verify merged URLs
+        XCTAssertEqual(merged.url, URL(string: "https://example1.com")!)
+        XCTAssertTrue(merged.notes?.contains("https://example1.com") ?? false)
+        XCTAssertTrue(merged.notes?.contains("https://example2.com") ?? false)
+        
+        // Cleanup
+        try eventStore.remove(primary, commit: true)
+        try eventStore.remove(duplicate, commit: true)
+    }
+    
+    func testMergeEventsWithOverlappingTimes() async throws {
+        let now = Date()
+        
+        // Create test events with overlapping times
+        let primary = createTestEvent(withTitle: "Meeting", startDate: now)
+        primary.endDate = now.addingTimeInterval(3600) // 1 hour duration
+        
+        let duplicate = createTestEvent(withTitle: "Meeting", startDate: now.addingTimeInterval(1800)) // 30 minutes later
+        duplicate.endDate = now.addingTimeInterval(5400) // 1.5 hours duration
+        
+        eventStore.mockEvents = [primary, duplicate]
+        let merged = eventMerger.mergeEvents(primary, with: [duplicate])
+        
+        // Verify merged times using time intervals (allowing for small differences)
+        let startDiff = abs(merged.startDate.timeIntervalSince(now))
+        let endDiff = abs(merged.endDate.timeIntervalSince(now.addingTimeInterval(5400)))
+        
+        XCTAssertLessThan(startDiff, 1.0, "Start dates should be within 1 second")
+        XCTAssertLessThan(endDiff, 1.0, "End dates should be within 1 second")
+        
+        // Cleanup
+        try eventStore.remove(primary, commit: true)
+        try eventStore.remove(duplicate, commit: true)
+    }
+    
     // MARK: - Helper Methods
     
     private func createTestEvent(withTitle title: String, startDate: Date) -> EKEvent {
