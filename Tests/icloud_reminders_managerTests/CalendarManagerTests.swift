@@ -175,6 +175,189 @@ final class CalendarManagerTests: XCTestCase {
         // Cleanup
         try eventStore.remove(activeWeeklyEvent, span: .thisEvent, commit: true)
     }
+    
+    func testMoveEventToCurrentWeekWithAllDayEvent() async throws {
+        // Create an all-day event from last week
+        let event = eventStore.createMockEvent()
+        event.title = "Last Week All Day Event"
+        event.startDate = Calendar.current.date(byAdding: .weekOfYear, value: -1, to: Date())!
+        event.endDate = Calendar.current.date(byAdding: .day, value: 1, to: event.startDate)!
+        event.isAllDay = true
+        event.calendar = defaultCalendar
+        try eventStore.save(event, span: .thisEvent, commit: true)
+        
+        // Move event to current week
+        try await calendarManager.moveEventToCurrentWeek(event)
+        
+        // Verify event was moved and remains all-day
+        let currentWeekStart = Calendar.current.startOfWeek(for: Date())
+        XCTAssertGreaterThanOrEqual(event.startDate, currentWeekStart)
+        XCTAssertLessThan(event.startDate, Calendar.current.date(byAdding: .weekOfYear, value: 1, to: currentWeekStart)!)
+        XCTAssertTrue(event.isAllDay)
+        XCTAssertEqual(Calendar.current.dateComponents([.hour, .minute], from: event.startDate).hour, 0)
+        XCTAssertEqual(Calendar.current.dateComponents([.hour, .minute], from: event.startDate).minute, 0)
+        
+        // Cleanup
+        try eventStore.remove(event, span: .thisEvent, commit: true)
+    }
+    
+    func testMoveEventToCurrentWeekWithWeekBoundary() async throws {
+        let calendar = Calendar.current
+        
+        // Create an event on Sunday of last week
+        let event = eventStore.createMockEvent()
+        event.title = "Last Week Sunday Event"
+        var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())
+        components.weekday = 1 // Sunday
+        components.hour = 15
+        components.minute = 30
+        let lastWeekSunday = calendar.date(byAdding: .weekOfYear, value: -1, to: calendar.date(from: components)!)!
+        
+        event.startDate = lastWeekSunday
+        event.endDate = calendar.date(byAdding: .hour, value: 1, to: event.startDate)!
+        event.calendar = defaultCalendar
+        try eventStore.save(event, span: .thisEvent, commit: true)
+        
+        // Move event to current week
+        try await calendarManager.moveEventToCurrentWeek(event)
+        
+        // Verify event was moved correctly
+        let currentWeekStart = calendar.startOfWeek(for: Date())
+        XCTAssertGreaterThanOrEqual(event.startDate, currentWeekStart)
+        XCTAssertEqual(calendar.component(.weekday, from: event.startDate), 1) // Still on Sunday
+        XCTAssertEqual(calendar.component(.hour, from: event.startDate), 15)
+        XCTAssertEqual(calendar.component(.minute, from: event.startDate), 30)
+        
+        // Cleanup
+        try eventStore.remove(event, span: .thisEvent, commit: true)
+    }
+    
+    func testMoveEventToCurrentWeekWithMultiDayEvent() async throws {
+        let calendar = Calendar.current
+        
+        // Create a multi-day event from last week
+        let event = eventStore.createMockEvent()
+        event.title = "Last Week Multi-day Event"
+        event.startDate = calendar.date(byAdding: .weekOfYear, value: -1, to: Date())!
+        event.endDate = calendar.date(byAdding: .day, value: 3, to: event.startDate)!
+        event.calendar = defaultCalendar
+        try eventStore.save(event, span: .thisEvent, commit: true)
+        
+        // Store original duration
+        let originalDuration = event.endDate.timeIntervalSince(event.startDate)
+        
+        // Move event to current week
+        try await calendarManager.moveEventToCurrentWeek(event)
+        
+        // Verify event was moved and maintains duration
+        let currentWeekStart = calendar.startOfWeek(for: Date())
+        XCTAssertGreaterThanOrEqual(event.startDate, currentWeekStart)
+        XCTAssertLessThan(event.startDate, calendar.date(byAdding: .weekOfYear, value: 1, to: currentWeekStart)!)
+        XCTAssertEqual(event.endDate.timeIntervalSince(event.startDate), originalDuration)
+        
+        // Cleanup
+        try eventStore.remove(event, span: .thisEvent, commit: true)
+    }
+    
+    func testMoveEventToCurrentWeekWithTimeZone() async throws {
+        let calendar = Calendar.current
+        
+        // Create an event from last week in a different time zone
+        let event = eventStore.createMockEvent()
+        event.title = "Last Week Event in Different Time Zone"
+        event.startDate = calendar.date(byAdding: .weekOfYear, value: -1, to: Date())!
+        event.endDate = calendar.date(byAdding: .hour, value: 1, to: event.startDate)!
+        event.timeZone = TimeZone(identifier: "America/New_York")
+        event.calendar = defaultCalendar
+        try eventStore.save(event, span: .thisEvent, commit: true)
+        
+        // Store original time zone and local time components
+        let originalTimeZone = event.timeZone
+        let originalHour = calendar.component(.hour, from: event.startDate)
+        let originalMinute = calendar.component(.minute, from: event.startDate)
+        
+        // Move event to current week
+        try await calendarManager.moveEventToCurrentWeek(event)
+        
+        // Verify event was moved and maintains time zone and local time
+        let currentWeekStart = calendar.startOfWeek(for: Date())
+        XCTAssertGreaterThanOrEqual(event.startDate, currentWeekStart)
+        XCTAssertLessThan(event.startDate, calendar.date(byAdding: .weekOfYear, value: 1, to: currentWeekStart)!)
+        XCTAssertEqual(event.timeZone, originalTimeZone)
+        XCTAssertEqual(calendar.component(.hour, from: event.startDate), originalHour)
+        XCTAssertEqual(calendar.component(.minute, from: event.startDate), originalMinute)
+        
+        // Cleanup
+        try eventStore.remove(event, span: .thisEvent, commit: true)
+    }
+    
+    func testMoveExpiredEventsToCurrentWeekWithErrors() async throws {
+        // Configure mock store to throw error
+        eventStore.shouldThrowError = true
+        
+        // Create a test event
+        let event = eventStore.createMockEvent()
+        event.title = "Test Event"
+        event.startDate = Calendar.current.date(byAdding: .weekOfYear, value: -1, to: Date())!
+        event.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: event.startDate)!
+        event.calendar = defaultCalendar
+        
+        // Save event without error
+        eventStore.shouldThrowError = false
+        try eventStore.save(event, span: .thisEvent, commit: true)
+        
+        // Set error flag for move operation
+        eventStore.shouldThrowError = true
+        
+        // Attempt to move expired events and expect error
+        do {
+            try await calendarManager.moveExpiredEventsToCurrentWeek()
+            XCTFail("Expected error to be thrown")
+        } catch {
+            XCTAssertTrue(error is MockError)
+        }
+        
+        // Reset mock store and cleanup
+        eventStore.shouldThrowError = false
+        try eventStore.remove(event, span: .thisEvent, commit: true)
+    }
+    
+    func testDeleteExpiredRecurringEventsWithMultipleRules() async throws {
+        let now = Date()
+        let calendar = Calendar.current
+        
+        // Create a test event with multiple recurrence rules
+        let event = eventStore.createMockEvent()
+        event.title = "Multi-rule Recurring Event"
+        event.startDate = calendar.date(byAdding: .month, value: -2, to: now)!
+        event.endDate = calendar.date(byAdding: .hour, value: 1, to: event.startDate)!
+        event.calendar = defaultCalendar
+        
+        // Add multiple recurrence rules, both expired
+        event.recurrenceRules = [
+            EKRecurrenceRule(
+                recurrenceWith: .weekly,
+                interval: 1,
+                end: .init(end: calendar.date(byAdding: .month, value: -1, to: now)!)
+            ),
+            EKRecurrenceRule(
+                recurrenceWith: .monthly,
+                interval: 1,
+                end: .init(end: calendar.date(byAdding: .month, value: -1, to: now)!)
+            )
+        ]
+        
+        try eventStore.save(event, span: .thisEvent, commit: true)
+        
+        // Delete expired recurring events
+        try await calendarManager.deleteExpiredRecurringEvents()
+        
+        // Verify event was deleted because all rules are expired
+        XCTAssertFalse(eventStore.mockEvents.contains(where: { $0 === event }))
+        
+        // Cleanup
+        try eventStore.remove(event, span: .thisEvent, commit: true)
+    }
 }
 
 // MARK: - Calendar Extension

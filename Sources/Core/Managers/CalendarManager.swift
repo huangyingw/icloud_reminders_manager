@@ -28,7 +28,6 @@ public class CalendarManager {
         let calendar = Calendar.current
         let now = Date()
         let currentWeekStart = calendar.startOfWeek(for: now)
-        let currentWeekEnd = calendar.date(byAdding: .weekOfYear, value: 1, to: currentWeekStart)!
         
         // If the event is already in the current week or future, don't move it
         if event.startDate >= currentWeekStart {

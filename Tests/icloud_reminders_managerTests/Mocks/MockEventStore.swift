@@ -1,16 +1,50 @@
 import Foundation
 import EventKit
 
+enum MockError: Error {
+    case testError
+}
+
 class MockEventStore: EKEventStore {
     var shouldGrantAccess = true
-    var mockSources: [EKSource] = []
-    var mockCalendars: [EKCalendar] = []
-    var mockReminders: [EKReminder] = []
+    var shouldThrowError = false
     var mockEvents: [EKEvent] = []
+    var mockCalendars: [EKCalendar] = []
+    var mockSources: [EKSource] = []
+    var mockReminders: [EKReminder] = []
     var mockFetchRemindersResponse: [EKReminder] = []
     
     override func requestAccess(to entityType: EKEntityType) async throws -> Bool {
         return shouldGrantAccess
+    }
+    
+    override func save(_ event: EKEvent, span: EKSpan, commit: Bool) throws {
+        if shouldThrowError {
+            throw MockError.testError
+        }
+        if !mockEvents.contains(where: { $0 === event }) {
+            mockEvents.append(event)
+        }
+    }
+    
+    override func remove(_ event: EKEvent, span: EKSpan, commit: Bool) throws {
+        if shouldThrowError {
+            throw MockError.testError
+        }
+        mockEvents.removeAll(where: { $0 === event })
+    }
+    
+    override func saveCalendar(_ calendar: EKCalendar, commit: Bool) throws {
+        if shouldThrowError {
+            throw MockError.testError
+        }
+        if !mockCalendars.contains(where: { $0 === calendar }) {
+            mockCalendars.append(calendar)
+        }
+    }
+    
+    override func events(matching predicate: NSPredicate) -> [EKEvent] {
+        return mockEvents
     }
     
     override var sources: [EKSource] {
@@ -21,42 +55,20 @@ class MockEventStore: EKEventStore {
         return mockCalendars
     }
     
-    override func saveCalendar(_ calendar: EKCalendar, commit: Bool) throws {
-        mockCalendars.append(calendar)
-    }
-    
-    override func removeCalendar(_ calendar: EKCalendar, commit: Bool) throws {
-        if let index = mockCalendars.firstIndex(of: calendar) {
-            mockCalendars.remove(at: index)
-        }
-    }
-    
     override func save(_ reminder: EKReminder, commit: Bool) throws {
-        if !mockReminders.contains(reminder) {
+        if shouldThrowError {
+            throw MockError.testError
+        }
+        if !mockReminders.contains(where: { $0 === reminder }) {
             mockReminders.append(reminder)
         }
     }
     
     override func remove(_ reminder: EKReminder, commit: Bool) throws {
-        if let index = mockReminders.firstIndex(of: reminder) {
-            mockReminders.remove(at: index)
+        if shouldThrowError {
+            throw MockError.testError
         }
-    }
-    
-    override func save(_ event: EKEvent, span: EKSpan, commit: Bool) throws {
-        if !mockEvents.contains(event) {
-            mockEvents.append(event)
-        }
-    }
-    
-    override func remove(_ event: EKEvent, span: EKSpan, commit: Bool) throws {
-        if let index = mockEvents.firstIndex(of: event) {
-            mockEvents.remove(at: index)
-        }
-    }
-    
-    override func events(matching predicate: NSPredicate) -> [EKEvent] {
-        return mockEvents
+        mockReminders.removeAll(where: { $0 === reminder })
     }
     
     override func fetchReminders(matching predicate: NSPredicate, completion: @escaping ([EKReminder]?) -> Void) -> Any {
@@ -64,15 +76,11 @@ class MockEventStore: EKEventStore {
         return NSObject()
     }
     
-    func createMockReminder() -> EKReminder {
-        return EKReminder(eventStore: self)
-    }
-    
     func createMockEvent() -> EKEvent {
         return EKEvent(eventStore: self)
     }
     
-    func createMockCalendar(for entityType: EKEntityType) -> EKCalendar {
-        return EKCalendar(for: entityType, eventStore: self)
+    func createMockReminder() -> EKReminder {
+        return EKReminder(eventStore: self)
     }
 } 
