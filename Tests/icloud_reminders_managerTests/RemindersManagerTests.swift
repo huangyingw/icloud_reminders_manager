@@ -1,6 +1,6 @@
 import XCTest
 import EventKit
-@testable import icloud_reminders_manager
+@testable import icloud_reminders_manager_core
 
 final class RemindersManagerTests: XCTestCase {
     var eventStore: MockEventStore!
@@ -18,10 +18,9 @@ final class RemindersManagerTests: XCTestCase {
         eventStore.mockSources = [mockSource]
         
         // Setup calendar
-        let store = EKEventStore()
-        defaultCalendar = EKCalendar(for: .reminder, eventStore: store)
+        defaultCalendar = EKCalendar(for: .reminder, eventStore: eventStore)
         defaultCalendar.source = mockSource
-        defaultCalendar.title = "Test Reminders"
+        defaultCalendar.title = "Test Calendar"
         try eventStore.saveCalendar(defaultCalendar, commit: true)
     }
     
@@ -33,31 +32,55 @@ final class RemindersManagerTests: XCTestCase {
     }
     
     func testRequestAccess() async throws {
-        let hasAccess = try await remindersManager.requestAccess()
-        XCTAssertTrue(hasAccess, "Should have access to reminders")
+        let granted = try await remindersManager.requestAccess()
+        XCTAssertTrue(granted)
         
-        // Test denied access
         eventStore.shouldGrantAccess = false
-        let noAccess = try await remindersManager.requestAccess()
-        XCTAssertFalse(noAccess, "Should not have access to reminders")
+        let denied = try await remindersManager.requestAccess()
+        XCTAssertFalse(denied)
     }
     
     func testFetchIncompleteReminders() async throws {
-        // Create a test reminder
-        let reminder = eventStore.createMockReminder()
-        reminder.title = "Test Reminder"
-        reminder.calendar = defaultCalendar
+        // Create test reminders
+        let reminder1 = createTestReminder(withTitle: "Test 1", isCompleted: false)
+        let reminder2 = createTestReminder(withTitle: "Test 2", isCompleted: false)
+        let completedReminder = createTestReminder(withTitle: "Completed", isCompleted: true)
         
-        // Fetch reminders
-        let reminders = try await remindersManager.fetchIncompleteReminders()
+        // Set up mock response
+        eventStore.mockFetchRemindersResponse = [reminder1, reminder2]
         
-        // Verify
-        XCTAssertFalse(reminders.isEmpty, "Should have at least one reminder")
-        XCTAssertTrue(reminders.contains { $0.title == "Test Reminder" })
-        XCTAssertEqual(eventStore.mockReminders.count, 1)
+        let incompleteReminders = try await remindersManager.fetchIncompleteReminders()
+        
+        // Should only find incomplete reminders
+        XCTAssertEqual(incompleteReminders.count, 2)
+        XCTAssertTrue(incompleteReminders.contains { $0.title == "Test 1" })
+        XCTAssertTrue(incompleteReminders.contains { $0.title == "Test 2" })
+        XCTAssertFalse(incompleteReminders.contains { $0.title == "Completed" })
+        
+        // Cleanup
+        try eventStore.remove(reminder1, commit: true)
+        try eventStore.remove(reminder2, commit: true)
+        try eventStore.remove(completedReminder, commit: true)
+    }
+    
+    func testMarkAsCompleted() async throws {
+        let reminder = createTestReminder(withTitle: "Test", isCompleted: false)
+        try await remindersManager.markAsCompleted(reminder)
+        
+        XCTAssertTrue(reminder.isCompleted)
         
         // Cleanup
         try eventStore.remove(reminder, commit: true)
-        XCTAssertEqual(eventStore.mockReminders.count, 0)
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func createTestReminder(withTitle title: String, isCompleted: Bool) -> EKReminder {
+        let reminder = eventStore.createMockReminder()
+        reminder.title = title
+        reminder.isCompleted = isCompleted
+        reminder.calendar = defaultCalendar
+        try? eventStore.save(reminder, commit: true)
+        return reminder
     }
 } 

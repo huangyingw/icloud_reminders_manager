@@ -10,14 +10,19 @@ let package = Package(
     ],
     dependencies: [],
     targets: [
+        .target(
+            name: "icloud_reminders_manager_core",
+            dependencies: [],
+            path: "Sources/Core"
+        ),
         .executableTarget(
             name: "icloud_reminders_manager",
-            dependencies: [],
-            path: "Sources/icloud_reminders_manager"
+            dependencies: ["icloud_reminders_manager_core"],
+            path: "Sources/App"
         ),
         .testTarget(
             name: "icloud_reminders_managerTests",
-            dependencies: ["icloud_reminders_manager"]
+            dependencies: ["icloud_reminders_manager_core"]
         ),
     ]
 )
