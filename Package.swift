@@ -8,21 +8,28 @@ let package = Package(
     platforms: [
         .macOS(.v13)
     ],
-    dependencies: [],
+    products: [
+        .executable(
+            name: "icloud_reminders_manager",
+            targets: ["App"]
+        ),
+    ],
     targets: [
         .target(
-            name: "icloud_reminders_manager_core",
-            dependencies: [],
-            path: "Sources/Core"
+            name: "Core",
+            dependencies: []
+        ),
+        .target(
+            name: "Managers",
+            dependencies: ["Core"]
         ),
         .executableTarget(
-            name: "icloud_reminders_manager",
-            dependencies: ["icloud_reminders_manager_core"],
-            path: "Sources/App"
+            name: "App",
+            dependencies: ["Core", "Managers"]
         ),
         .testTarget(
             name: "icloud_reminders_managerTests",
-            dependencies: ["icloud_reminders_manager_core"]
+            dependencies: ["Core", "Managers", "App"]
         ),
     ]
 )

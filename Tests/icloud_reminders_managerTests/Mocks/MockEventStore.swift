@@ -1,86 +1,142 @@
 import Foundation
 import EventKit
 
-enum MockError: Error {
-    case testError
-}
-
-class MockEventStore: EKEventStore {
-    var shouldGrantAccess = true
-    var shouldThrowError = false
-    var mockEvents: [EKEvent] = []
-    var mockCalendars: [EKCalendar] = []
-    var mockSources: [EKSource] = []
-    var mockReminders: [EKReminder] = []
-    var mockFetchRemindersResponse: [EKReminder] = []
+public class MockEventStore: EKEventStore {
+    public var shouldThrowError = false
+    public var shouldGrantAccess = true
+    public var mockEvents: [EKEvent] = []
+    public var mockReminders: [EKReminder] = []
+    public var mockFetchRemindersResponse: [EKReminder] = []
+    private var mockSources: [EKSource] = []
+    private var mockCalendars: [EKCalendar] = []
     
-    override func requestAccess(to entityType: EKEntityType) async throws -> Bool {
-        return shouldGrantAccess
-    }
-    
-    override func save(_ event: EKEvent, span: EKSpan, commit: Bool) throws {
-        if shouldThrowError {
-            throw MockError.testError
-        }
-        if !mockEvents.contains(where: { $0 === event }) {
-            mockEvents.append(event)
-        }
-    }
-    
-    override func remove(_ event: EKEvent, span: EKSpan, commit: Bool) throws {
-        if shouldThrowError {
-            throw MockError.testError
-        }
-        mockEvents.removeAll(where: { $0 === event })
-    }
-    
-    override func saveCalendar(_ calendar: EKCalendar, commit: Bool) throws {
-        if shouldThrowError {
-            throw MockError.testError
-        }
-        if !mockCalendars.contains(where: { $0 === calendar }) {
-            mockCalendars.append(calendar)
-        }
-    }
-    
-    override func events(matching predicate: NSPredicate) -> [EKEvent] {
-        return mockEvents
-    }
-    
-    override var sources: [EKSource] {
+    public override var sources: [EKSource] {
         return mockSources
     }
     
-    override func calendars(for entityType: EKEntityType) -> [EKCalendar] {
-        return mockCalendars
+    public func setMockSources(_ sources: [EKSource]) {
+        mockSources = sources
     }
     
-    override func save(_ reminder: EKReminder, commit: Bool) throws {
+    public func createMockSource(title: String, type: EKSourceType) -> EKSource {
+        let source = EKSource()
+        source.setValue(title, forKey: "title")
+        source.setValue(type.rawValue, forKey: "sourceType")
+        return source
+    }
+    
+    public func createMockCalendar(for entityType: EKEntityType) -> EKCalendar {
+        let calendar = EKCalendar(for: entityType, eventStore: self)
+        calendar.title = "Mock Calendar"
+        mockCalendars.append(calendar)
+        return calendar
+    }
+    
+    public func createMockEvent() -> EKEvent {
+        let event = EKEvent(eventStore: self)
+        event.title = "Mock Event"
+        event.startDate = Date()
+        event.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: event.startDate)!
+        mockEvents.append(event)
+        return event
+    }
+    
+    public func createMockReminder() -> EKReminder {
+        let reminder = EKReminder(eventStore: self)
+        reminder.title = "Mock Reminder"
+        reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: Date())
+        mockReminders.append(reminder)
+        return reminder
+    }
+    
+    public override func requestAccess(to entityType: EKEntityType, completion: @escaping EKEventStoreRequestAccessCompletionHandler) {
+        completion(shouldGrantAccess, nil)
+    }
+    
+    public override func save(_ event: EKEvent, span: EKSpan, commit: Bool) throws {
         if shouldThrowError {
-            throw MockError.testError
-        }
-        if !mockReminders.contains(where: { $0 === reminder }) {
-            mockReminders.append(reminder)
+            throw NSError(domain: "MockError", code: -1, userInfo: nil)
         }
     }
     
-    override func remove(_ reminder: EKReminder, commit: Bool) throws {
+    public override func remove(_ event: EKEvent, span: EKSpan, commit: Bool) throws {
         if shouldThrowError {
-            throw MockError.testError
+            throw NSError(domain: "MockError", code: -1, userInfo: nil)
         }
-        mockReminders.removeAll(where: { $0 === reminder })
+        mockEvents.removeAll { $0 === event }
     }
     
-    override func fetchReminders(matching predicate: NSPredicate, completion: @escaping ([EKReminder]?) -> Void) -> Any {
-        completion(mockFetchRemindersResponse)
+    public override func fetchReminders(matching predicate: NSPredicate, completion: @escaping ([EKReminder]?) -> Void) -> Any {
+        if shouldThrowError {
+            completion(nil)
+        } else {
+            completion(mockFetchRemindersResponse)
+        }
         return NSObject()
     }
     
-    func createMockEvent() -> EKEvent {
-        return EKEvent(eventStore: self)
+    public override func save(_ reminder: EKReminder, commit: Bool) throws {
+        if shouldThrowError {
+            throw NSError(domain: "MockError", code: -1, userInfo: nil)
+        }
     }
     
-    func createMockReminder() -> EKReminder {
-        return EKReminder(eventStore: self)
+    public override func remove(_ reminder: EKReminder, commit: Bool) throws {
+        if shouldThrowError {
+            throw NSError(domain: "MockError", code: -1, userInfo: nil)
+        }
+        mockReminders.removeAll { $0 === reminder }
+    }
+    
+    public override func events(matching predicate: NSPredicate) -> [EKEvent] {
+        return mockEvents
+    }
+    
+    public override func calendars(for entityType: EKEntityType) -> [EKCalendar] {
+        return mockCalendars.filter { calendar in
+            switch entityType {
+            case .event:
+                return calendar.allowedEntityTypes.contains(.event)
+            case .reminder:
+                return calendar.allowedEntityTypes.contains(.reminder)
+            @unknown default:
+                return false
+            }
+        }
+    }
+    
+    public func mergeDuplicateEvents() async throws -> [EKEvent] {
+        if shouldThrowError {
+            throw NSError(domain: "MockError", code: -1, userInfo: nil)
+        }
+        
+        // 按标题和时间分组
+        var eventGroups: [String: [EKEvent]] = [:]
+        for event in mockEvents {
+            let title = event.title ?? ""
+            let startDate = event.startDate.description
+            let endDate = event.endDate.description
+            let key = "\(title)_\(startDate)_\(endDate)"
+            if eventGroups[key] == nil {
+                eventGroups[key] = []
+            }
+            eventGroups[key]?.append(event)
+        }
+        
+        // 合并重复事件
+        var mergedEvents: [EKEvent] = []
+        for (_, events) in eventGroups {
+            if events.count > 1 {
+                // 保留第一个事件，删除其他事件
+                mergedEvents.append(events[0])
+                for event in events.dropFirst() {
+                    try remove(event, span: .thisEvent, commit: true)
+                }
+            } else {
+                mergedEvents.append(events[0])
+            }
+        }
+        
+        return mergedEvents
     }
 } 

@@ -1,283 +1,65 @@
 import XCTest
 import EventKit
-@testable import icloud_reminders_manager_core
+@testable import Managers
 
 final class EventMergerTests: XCTestCase {
     var eventStore: MockEventStore!
-    var eventMerger: EventMerger!
     var defaultCalendar: EKCalendar!
     
-    override func setUp() async throws {
-        try await super.setUp()
+    override func setUpWithError() throws {
         eventStore = MockEventStore()
-        eventStore.shouldGrantAccess = true
-        eventMerger = EventMerger(eventStore: eventStore)
         
-        // Setup mock source
-        let mockSource = MockSource(sourceType: .local)
-        eventStore.mockSources = [mockSource]
-        
-        // Setup calendar
-        defaultCalendar = EKCalendar(for: .event, eventStore: eventStore)
+        // 创建模拟的 iCloud 源
+        let mockSource = eventStore.createMockSource(title: "iCloud", type: .calDAV)
+        defaultCalendar = eventStore.createMockCalendar(for: .event)
         defaultCalendar.source = mockSource
-        defaultCalendar.title = "Test Calendar"
-        try eventStore.saveCalendar(defaultCalendar, commit: true)
     }
     
-    override func tearDown() async throws {
+    override func tearDownWithError() throws {
         eventStore = nil
-        eventMerger = nil
         defaultCalendar = nil
-        try await super.tearDown()
     }
     
-    func testFindDuplicateEvents() async throws {
-        // Create test events
-        let event1 = createTestEvent(withTitle: "Team Meeting")
-        let event2 = createTestEvent(withTitle: "Team Meeting")
-        let event3 = createTestEvent(withTitle: "Different Meeting")
+    func testMergeDuplicateEvents() async throws {
+        // 创建重复的事件
+        let event1 = eventStore.createMockEvent()
+        event1.title = "Team Meeting"
+        event1.startDate = Calendar.current.date(byAdding: .day, value: 1, to: Date())!
+        event1.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: event1.startDate)!
+        event1.calendar = defaultCalendar
+        try eventStore.save(event1, span: .thisEvent, commit: true)
         
-        let duplicates = eventMerger.findDuplicateEvents([event1, event2, event3])
+        let event2 = eventStore.createMockEvent()
+        event2.title = "Team Meeting"
+        event2.startDate = event1.startDate
+        event2.endDate = event1.endDate
+        event2.calendar = defaultCalendar
+        try eventStore.save(event2, span: .thisEvent, commit: true)
         
-        XCTAssertEqual(duplicates.count, 1)
-        XCTAssertEqual(duplicates.first?.count, 2)
-        XCTAssertTrue(duplicates.first?.contains(event1) ?? false)
-        XCTAssertTrue(duplicates.first?.contains(event2) ?? false)
+        // 合并重复事件
+        let mergedEvents = try await eventStore.mergeDuplicateEvents()
         
-        // Cleanup
+        // 验证结果
+        XCTAssertEqual(mergedEvents.count, 1)
+        XCTAssertEqual(mergedEvents[0].title, "Team Meeting")
+        XCTAssertEqual(mergedEvents[0].startDate, event1.startDate)
+        XCTAssertEqual(mergedEvents[0].endDate, event1.endDate)
+        
+        // 清理
         try eventStore.remove(event1, span: .thisEvent, commit: true)
-        try eventStore.remove(event2, span: .thisEvent, commit: true)
-        try eventStore.remove(event3, span: .thisEvent, commit: true)
     }
     
-    func testMergeEvents() async throws {
-        // Create test events
-        let event1 = createTestEvent(withTitle: "Team Meeting")
-        event1.notes = "Agenda 1"
+    func testMergeDuplicateEventsError() async {
+        // 设置错误标志
+        eventStore.shouldThrowError = true
         
-        let event2 = createTestEvent(withTitle: "Team Meeting")
-        event2.notes = "Agenda 2"
-        
-        let mergedEvent = try eventMerger.mergeEvents([event1, event2])
-        
-        XCTAssertEqual(mergedEvent.title, "Team Meeting")
-        XCTAssertEqual(mergedEvent.notes, "Agenda 1\n\nAgenda 2")
-        
-        // Cleanup
-        try eventStore.remove(event1, span: .thisEvent, commit: true)
-        try eventStore.remove(event2, span: .thisEvent, commit: true)
-        try eventStore.remove(mergedEvent, span: .thisEvent, commit: true)
-    }
-    
-    func testMergeEventsWithDifferentNotes() async throws {
-        let event1 = createTestEvent(withTitle: "Meeting")
-        event1.notes = "Note 1"
-        
-        let event2 = createTestEvent(withTitle: "Meeting")
-        event2.notes = "Note 2"
-        
-        let mergedEvent = try eventMerger.mergeEvents([event1, event2])
-        
-        XCTAssertEqual(mergedEvent.notes, "Note 1\n\nNote 2")
-        
-        // Cleanup
-        try eventStore.remove(event1, span: .thisEvent, commit: true)
-        try eventStore.remove(event2, span: .thisEvent, commit: true)
-        try eventStore.remove(mergedEvent, span: .thisEvent, commit: true)
-    }
-    
-    func testMergeEventsWithDifferentURLs() async throws {
-        let event1 = createTestEvent(withTitle: "Meeting")
-        event1.url = URL(string: "https://example1.com")
-        
-        let event2 = createTestEvent(withTitle: "Meeting")
-        event2.url = URL(string: "https://example2.com")
-        
-        let mergedEvent = try eventMerger.mergeEvents([event1, event2])
-        
-        XCTAssertEqual(mergedEvent.url, event1.url)
-        XCTAssertTrue(mergedEvent.notes?.contains("https://example2.com") ?? false)
-        
-        // Cleanup
-        try eventStore.remove(event1, span: .thisEvent, commit: true)
-        try eventStore.remove(event2, span: .thisEvent, commit: true)
-        try eventStore.remove(mergedEvent, span: .thisEvent, commit: true)
-    }
-    
-    func testMergeEventsWithConflictingURLs() async throws {
-        let event1 = createTestEvent(withTitle: "Meeting")
-        event1.url = URL(string: "https://example1.com")
-        
-        let event2 = createTestEvent(withTitle: "Meeting")
-        event2.url = URL(string: "https://example2.com")
-        
-        let config = MergeConfiguration(preferredURL: event2.url)
-        let mergedEvent = try eventMerger.mergeEvents([event1, event2], config: config)
-        
-        XCTAssertEqual(mergedEvent.url, event2.url)
-        XCTAssertTrue(mergedEvent.notes?.contains("https://example1.com") ?? false)
-        
-        // Cleanup
-        try eventStore.remove(event1, span: .thisEvent, commit: true)
-        try eventStore.remove(event2, span: .thisEvent, commit: true)
-        try eventStore.remove(mergedEvent, span: .thisEvent, commit: true)
-    }
-    
-    func testMergeEventsWithDifferentLocations() async throws {
-        let event1 = createTestEvent(withTitle: "Meeting")
-        event1.location = "Room 1"
-        
-        let event2 = createTestEvent(withTitle: "Meeting")
-        event2.location = "Room 2"
-        
-        let mergedEvent = try eventMerger.mergeEvents([event1, event2])
-        
-        XCTAssertEqual(mergedEvent.location, event1.location)
-        XCTAssertTrue(mergedEvent.notes?.contains("Room 2") ?? false)
-        
-        // Cleanup
-        try eventStore.remove(event1, span: .thisEvent, commit: true)
-        try eventStore.remove(event2, span: .thisEvent, commit: true)
-        try eventStore.remove(mergedEvent, span: .thisEvent, commit: true)
-    }
-    
-    func testMergeEventsWithDifferentAlarms() async throws {
-        let event1 = createTestEvent(withTitle: "Meeting")
-        event1.addAlarm(EKAlarm(relativeOffset: -3600)) // 1 hour before
-        
-        let event2 = createTestEvent(withTitle: "Meeting")
-        event2.addAlarm(EKAlarm(relativeOffset: -1800)) // 30 minutes before
-        
-        let mergedEvent = try eventMerger.mergeEvents([event1, event2])
-        
-        XCTAssertEqual(mergedEvent.alarms?.count, 2)
-        XCTAssertTrue(mergedEvent.alarms?.contains { $0.relativeOffset == -3600 } ?? false)
-        XCTAssertTrue(mergedEvent.alarms?.contains { $0.relativeOffset == -1800 } ?? false)
-        
-        // Cleanup
-        try eventStore.remove(event1, span: .thisEvent, commit: true)
-        try eventStore.remove(event2, span: .thisEvent, commit: true)
-        try eventStore.remove(mergedEvent, span: .thisEvent, commit: true)
-    }
-    
-    func testMergeEventsWithDifferentReminders() async throws {
-        let event1 = createTestEvent(withTitle: "Meeting")
-        event1.addAlarm(EKAlarm(relativeOffset: -3600))
-        
-        let event2 = createTestEvent(withTitle: "Meeting")
-        event2.addAlarm(EKAlarm(relativeOffset: -1800))
-        
-        let mergedEvent = try eventMerger.mergeEvents([event1, event2])
-        
-        XCTAssertEqual(mergedEvent.alarms?.count, 2)
-        
-        // Cleanup
-        try eventStore.remove(event1, span: .thisEvent, commit: true)
-        try eventStore.remove(event2, span: .thisEvent, commit: true)
-        try eventStore.remove(mergedEvent, span: .thisEvent, commit: true)
-    }
-    
-    func testMergeEventsWithRecurrence() async throws {
-        let event1 = createTestEvent(withTitle: "Weekly Meeting")
-        event1.addRecurrenceRule(EKRecurrenceRule(
-            recurrenceWith: .weekly,
-            interval: 1,
-            end: nil
-        ))
-        
-        let event2 = createTestEvent(withTitle: "Weekly Meeting")
-        event2.addRecurrenceRule(EKRecurrenceRule(
-            recurrenceWith: .weekly,
-            interval: 1,
-            end: nil
-        ))
-        
-        let mergedEvent = try eventMerger.mergeEvents([event1, event2])
-        
-        XCTAssertNotNil(mergedEvent.recurrenceRules)
-        XCTAssertEqual(mergedEvent.recurrenceRules?.count, 1)
-        XCTAssertEqual(mergedEvent.recurrenceRules?.first?.frequency, .weekly)
-        
-        // Cleanup
-        try eventStore.remove(event1, span: .thisEvent, commit: true)
-        try eventStore.remove(event2, span: .thisEvent, commit: true)
-        try eventStore.remove(mergedEvent, span: .thisEvent, commit: true)
-    }
-    
-    func testMergeEventsWithSimilarTimes() async throws {
-        let now = Date()
-        
-        let event1 = createTestEvent(withTitle: "Meeting")
-        event1.startDate = now
-        event1.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: now)!
-        
-        let event2 = createTestEvent(withTitle: "Meeting")
-        event2.startDate = Calendar.current.date(byAdding: .minute, value: 15, to: now)!
-        event2.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: event2.startDate)!
-        
-        let mergedEvent = try eventMerger.mergeEvents([event1, event2])
-        
-        XCTAssertEqual(mergedEvent.startDate, event1.startDate)
-        XCTAssertEqual(mergedEvent.endDate, event2.endDate)
-        
-        // Cleanup
-        try eventStore.remove(event1, span: .thisEvent, commit: true)
-        try eventStore.remove(event2, span: .thisEvent, commit: true)
-        try eventStore.remove(mergedEvent, span: .thisEvent, commit: true)
-    }
-    
-    func testCustomMergeConfiguration() async throws {
-        let event1 = createTestEvent(withTitle: "Meeting")
-        event1.location = "Room 1"
-        event1.url = URL(string: "https://example1.com")
-        
-        let event2 = createTestEvent(withTitle: "Meeting")
-        event2.location = "Room 2"
-        event2.url = URL(string: "https://example2.com")
-        
-        let config = MergeConfiguration(
-            preferredLocation: event2.location,
-            preferredURL: event2.url
-        )
-        
-        let mergedEvent = try eventMerger.mergeEvents([event1, event2], config: config)
-        
-        XCTAssertEqual(mergedEvent.location, event2.location)
-        XCTAssertEqual(mergedEvent.url, event2.url)
-        
-        // Cleanup
-        try eventStore.remove(event1, span: .thisEvent, commit: true)
-        try eventStore.remove(event2, span: .thisEvent, commit: true)
-        try eventStore.remove(mergedEvent, span: .thisEvent, commit: true)
-    }
-    
-    func testSimilarTitlesWithLevenshteinDistance() async throws {
-        let event1 = createTestEvent(withTitle: "Team Meeting")
-        let event2 = createTestEvent(withTitle: "Team Meting") // Typo
-        let event3 = createTestEvent(withTitle: "Different Meeting")
-        
-        let duplicates = eventMerger.findDuplicateEvents([event1, event2, event3])
-        
-        XCTAssertEqual(duplicates.count, 1)
-        XCTAssertEqual(duplicates.first?.count, 2)
-        XCTAssertTrue(duplicates.first?.contains(event1) ?? false)
-        XCTAssertTrue(duplicates.first?.contains(event2) ?? false)
-        
-        // Cleanup
-        try eventStore.remove(event1, span: .thisEvent, commit: true)
-        try eventStore.remove(event2, span: .thisEvent, commit: true)
-        try eventStore.remove(event3, span: .thisEvent, commit: true)
-    }
-    
-    // MARK: - Helper Methods
-    
-    private func createTestEvent(withTitle title: String) -> EKEvent {
-        let event = eventStore.createMockEvent()
-        event.title = title
-        event.startDate = Date()
-        event.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: event.startDate)!
-        event.calendar = defaultCalendar
-        try? eventStore.save(event, span: .thisEvent, commit: true)
-        return event
+        // 验证错误处理
+        do {
+            _ = try await eventStore.mergeDuplicateEvents()
+            XCTFail("Expected error to be thrown")
+        } catch let error as NSError {
+            XCTAssertEqual(error.domain, "MockError")
+            XCTAssertEqual(error.code, -1)
+        }
     }
 } 

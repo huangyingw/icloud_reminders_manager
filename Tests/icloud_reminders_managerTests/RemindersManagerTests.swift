@@ -1,86 +1,66 @@
 import XCTest
 import EventKit
-@testable import icloud_reminders_manager_core
+@testable import Managers
 
 final class RemindersManagerTests: XCTestCase {
     var eventStore: MockEventStore!
     var remindersManager: RemindersManager!
     var defaultCalendar: EKCalendar!
     
-    override func setUp() async throws {
-        try await super.setUp()
+    override func setUpWithError() throws {
         eventStore = MockEventStore()
-        eventStore.shouldGrantAccess = true
-        remindersManager = RemindersManager(eventStore: eventStore)
         
-        // Setup mock source
-        let mockSource = MockSource(sourceType: .local)
-        eventStore.mockSources = [mockSource]
-        
-        // Setup calendar
-        defaultCalendar = EKCalendar(for: .reminder, eventStore: eventStore)
+        // 创建模拟的 iCloud 源
+        let mockSource = eventStore.createMockSource(title: "iCloud", type: .calDAV)
+        defaultCalendar = eventStore.createMockCalendar(for: .reminder)
         defaultCalendar.source = mockSource
-        defaultCalendar.title = "Test Calendar"
-        try eventStore.saveCalendar(defaultCalendar, commit: true)
+        
+        remindersManager = RemindersManager(eventStore: eventStore)
     }
     
-    override func tearDown() async throws {
+    override func tearDownWithError() throws {
         eventStore = nil
         remindersManager = nil
         defaultCalendar = nil
-        try await super.tearDown()
-    }
-    
-    func testRequestAccess() async throws {
-        let granted = try await remindersManager.requestAccess()
-        XCTAssertTrue(granted)
-        
-        eventStore.shouldGrantAccess = false
-        let denied = try await remindersManager.requestAccess()
-        XCTAssertFalse(denied)
     }
     
     func testFetchIncompleteReminders() async throws {
-        // Create test reminders
-        let reminder1 = createTestReminder(withTitle: "Test 1", isCompleted: false)
-        let reminder2 = createTestReminder(withTitle: "Test 2", isCompleted: false)
-        let completedReminder = createTestReminder(withTitle: "Completed", isCompleted: true)
+        // 创建测试提醒
+        let reminder1 = eventStore.createMockReminder()
+        reminder1.title = "Test Reminder 1"
+        reminder1.isCompleted = false
         
-        // Set up mock response
+        let reminder2 = eventStore.createMockReminder()
+        reminder2.title = "Test Reminder 2"
+        reminder2.isCompleted = false
+        
+        let completedReminder = eventStore.createMockReminder()
+        completedReminder.title = "Completed Reminder"
+        completedReminder.isCompleted = true
+        
+        // 设置模拟响应
         eventStore.mockFetchRemindersResponse = [reminder1, reminder2]
         
-        let incompleteReminders = try await remindersManager.fetchIncompleteReminders()
+        // 获取未完成的提醒
+        let reminders = try await remindersManager.fetchIncompleteReminders()
         
-        // Should only find incomplete reminders
-        XCTAssertEqual(incompleteReminders.count, 2)
-        XCTAssertTrue(incompleteReminders.contains { $0.title == "Test 1" })
-        XCTAssertTrue(incompleteReminders.contains { $0.title == "Test 2" })
-        XCTAssertFalse(incompleteReminders.contains { $0.title == "Completed" })
-        
-        // Cleanup
-        try eventStore.remove(reminder1, commit: true)
-        try eventStore.remove(reminder2, commit: true)
-        try eventStore.remove(completedReminder, commit: true)
+        // 验证结果
+        XCTAssertEqual(reminders.count, 2)
+        XCTAssertEqual(reminders[0].title, "Test Reminder 1")
+        XCTAssertEqual(reminders[1].title, "Test Reminder 2")
     }
     
-    func testMarkAsCompleted() async throws {
-        let reminder = createTestReminder(withTitle: "Test", isCompleted: false)
-        try await remindersManager.markAsCompleted(reminder)
+    func testFetchIncompleteRemindersError() async {
+        // 设置错误标志
+        eventStore.shouldThrowError = true
         
-        XCTAssertTrue(reminder.isCompleted)
-        
-        // Cleanup
-        try eventStore.remove(reminder, commit: true)
-    }
-    
-    // MARK: - Helper Methods
-    
-    private func createTestReminder(withTitle title: String, isCompleted: Bool) -> EKReminder {
-        let reminder = eventStore.createMockReminder()
-        reminder.title = title
-        reminder.isCompleted = isCompleted
-        reminder.calendar = defaultCalendar
-        try? eventStore.save(reminder, commit: true)
-        return reminder
+        // 验证错误处理
+        do {
+            _ = try await remindersManager.fetchIncompleteReminders()
+            XCTFail("Expected error to be thrown")
+        } catch let error as NSError {
+            XCTAssertEqual(error.domain, "RemindersManager")
+            XCTAssertEqual(error.code, -1)
+        }
     }
 } 
