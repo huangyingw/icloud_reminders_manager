@@ -1,0 +1,16 @@
+{
+    "calendars": {
+        "target": "个人",
+        "source": ["iCloud"],
+        "ignore": ["Birthdays", "Holidays"]
+    },
+    "reminders": {
+        "lists": ["Reminders"],
+        "autoCreate": true
+    },
+    "sync": {
+        "interval": 300,
+        "autoMerge": true,
+        "keepOriginal": false
+    }
+}

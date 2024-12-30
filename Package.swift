@@ -8,28 +8,22 @@ let package = Package(
     platforms: [
         .macOS(.v13)
     ],
-    products: [
-        .executable(
-            name: "icloud_reminders_manager",
-            targets: ["App"]
-        ),
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0")
     ],
     targets: [
-        .target(
-            name: "Core",
-            dependencies: []
-        ),
-        .target(
-            name: "Managers",
-            dependencies: ["Core"]
-        ),
         .executableTarget(
-            name: "App",
-            dependencies: ["Core", "Managers"]
+            name: "icloud_reminders_manager",
+            dependencies: [
+                .product(name: "Logging", package: "swift-log")
+            ]
         ),
         .testTarget(
             name: "icloud_reminders_managerTests",
-            dependencies: ["Core", "Managers", "App"]
-        ),
+            dependencies: [
+                "icloud_reminders_manager",
+                .product(name: "Logging", package: "swift-log")
+            ]
+        )
     ]
 )

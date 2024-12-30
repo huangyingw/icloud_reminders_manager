@@ -4,4 +4,5 @@ SCRIPTPATH=$(dirname "$SCRIPT")
 cd "$SCRIPTPATH"
 
 swift test && \
-    echo success
+    echo success && \
+    swift run

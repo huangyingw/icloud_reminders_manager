@@ -1,66 +1,76 @@
 import XCTest
 import EventKit
-@testable import Managers
+import Logging
+@testable import icloud_reminders_manager
 
 final class RemindersManagerTests: XCTestCase {
     var eventStore: MockEventStore!
     var remindersManager: RemindersManager!
-    var defaultCalendar: EKCalendar!
+    var defaultList: EKCalendar!
     
-    override func setUpWithError() throws {
+    override func setUp() {
+        super.setUp()
         eventStore = MockEventStore()
         
         // 创建模拟的 iCloud 源
-        let mockSource = eventStore.createMockSource(title: "iCloud", type: .calDAV)
-        defaultCalendar = eventStore.createMockCalendar(for: .reminder)
-        defaultCalendar.source = mockSource
+        let mockSource = eventStore.createMockSource(title: "iCloud", type: EKSourceType.calDAV)
+        defaultList = eventStore.createMockCalendar(for: EKEntityType.reminder, title: "Default List", source: mockSource)
         
         remindersManager = RemindersManager(eventStore: eventStore)
     }
     
-    override func tearDownWithError() throws {
+    override func tearDown() {
         eventStore = nil
         remindersManager = nil
-        defaultCalendar = nil
+        defaultList = nil
+        super.tearDown()
     }
     
-    func testFetchIncompleteReminders() async throws {
+    func testGetReminders() async throws {
         // 创建测试提醒
-        let reminder1 = eventStore.createMockReminder()
-        reminder1.title = "Test Reminder 1"
-        reminder1.isCompleted = false
+        let reminder = eventStore.createMockReminder(title: "Test Reminder", calendar: defaultList)
+        try eventStore.save(reminder, span: .thisEvent)
         
-        let reminder2 = eventStore.createMockReminder()
-        reminder2.title = "Test Reminder 2"
-        reminder2.isCompleted = false
-        
-        let completedReminder = eventStore.createMockReminder()
-        completedReminder.title = "Completed Reminder"
-        completedReminder.isCompleted = true
-        
-        // 设置模拟响应
-        eventStore.mockFetchRemindersResponse = [reminder1, reminder2]
-        
-        // 获取未完成的提醒
-        let reminders = try await remindersManager.fetchIncompleteReminders()
+        // 获取提醒
+        let reminders = try await remindersManager.getReminders(from: defaultList)
         
         // 验证结果
-        XCTAssertEqual(reminders.count, 2)
-        XCTAssertEqual(reminders[0].title, "Test Reminder 1")
-        XCTAssertEqual(reminders[1].title, "Test Reminder 2")
+        XCTAssertEqual(reminders.count, 1)
+        XCTAssertEqual(reminders.first?.title, "Test Reminder")
+        
+        // 验证 save 方法被正确调用
+        XCTAssertEqual(eventStore.savedReminders.count, 1)
+        XCTAssertEqual(eventStore.savedReminders[0].reminder, reminder)
+        XCTAssertEqual(eventStore.savedReminders[0].span, .thisEvent)
     }
     
-    func testFetchIncompleteRemindersError() async {
-        // 设置错误标志
-        eventStore.shouldThrowError = true
+    func testGetExpiredReminders() async throws {
+        // 创建过期提醒
+        let expiredReminder = eventStore.createMockReminder(
+            title: "Expired Reminder",
+            dueDate: Date().addingTimeInterval(-86400),
+            calendar: defaultList
+        )
+        try eventStore.save(expiredReminder, span: .thisEvent)
         
-        // 验证错误处理
-        do {
-            _ = try await remindersManager.fetchIncompleteReminders()
-            XCTFail("Expected error to be thrown")
-        } catch let error as NSError {
-            XCTAssertEqual(error.domain, "RemindersManager")
-            XCTAssertEqual(error.code, -1)
-        }
+        // 创建未过期提醒
+        let activeReminder = eventStore.createMockReminder(
+            title: "Active Reminder",
+            dueDate: Date().addingTimeInterval(86400),
+            calendar: defaultList
+        )
+        try eventStore.save(activeReminder, span: .thisEvent)
+        
+        // 获取过期提醒
+        let expiredReminders = try await remindersManager.getExpiredReminders(from: defaultList)
+        
+        // 验证结果
+        XCTAssertEqual(expiredReminders.count, 1)
+        XCTAssertEqual(expiredReminders.first?.title, "Expired Reminder")
+        
+        // 验证 save 方法被正确调用
+        XCTAssertEqual(eventStore.savedReminders.count, 2)
+        XCTAssertTrue(eventStore.savedReminders.contains { $0.reminder === expiredReminder && $0.span == .thisEvent })
+        XCTAssertTrue(eventStore.savedReminders.contains { $0.reminder === activeReminder && $0.span == .thisEvent })
     }
 } 

@@ -1,65 +1,110 @@
 import XCTest
 import EventKit
-@testable import Managers
+@testable import icloud_reminders_manager
 
 final class EventMergerTests: XCTestCase {
     var eventStore: MockEventStore!
-    var defaultCalendar: EKCalendar!
+    var eventMerger: EventMerger!
+    var iCloudSource: EKSource!
+    var calendar: EKCalendar!
     
-    override func setUpWithError() throws {
+    override func setUp() {
+        super.setUp()
+        
+        // 创建 Mock 事件存储
         eventStore = MockEventStore()
         
-        // 创建模拟的 iCloud 源
-        let mockSource = eventStore.createMockSource(title: "iCloud", type: .calDAV)
-        defaultCalendar = eventStore.createMockCalendar(for: .event)
-        defaultCalendar.source = mockSource
+        // 创建 iCloud 源
+        iCloudSource = eventStore.createMockSource(title: "iCloud", type: .calDAV)
+        
+        // 创建日历
+        calendar = eventStore.createMockCalendar(for: .event, title: "测试日历", source: iCloudSource)
+        
+        // 创建事件合并器
+        eventMerger = EventMerger(eventStore: eventStore)
     }
     
-    override func tearDownWithError() throws {
+    override func tearDown() {
         eventStore = nil
-        defaultCalendar = nil
+        eventMerger = nil
+        iCloudSource = nil
+        calendar = nil
+        super.tearDown()
     }
     
-    func testMergeDuplicateEvents() async throws {
-        // 创建重复的事件
-        let event1 = eventStore.createMockEvent()
-        event1.title = "Team Meeting"
-        event1.startDate = Calendar.current.date(byAdding: .day, value: 1, to: Date())!
-        event1.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: event1.startDate)!
-        event1.calendar = defaultCalendar
-        try eventStore.save(event1, span: .thisEvent, commit: true)
+    func testMergeEvents() throws {
+        // 创建测试事件
+        let event1 = eventStore.createMockEvent(
+            title: "测试事件",
+            startDate: Date().addingTimeInterval(-3600), // 一小时前
+            calendar: calendar
+        )
         
-        let event2 = eventStore.createMockEvent()
-        event2.title = "Team Meeting"
-        event2.startDate = event1.startDate
-        event2.endDate = event1.endDate
-        event2.calendar = defaultCalendar
-        try eventStore.save(event2, span: .thisEvent, commit: true)
+        let event2 = eventStore.createMockEvent(
+            title: "测试事件",
+            startDate: Date(), // 现在
+            calendar: calendar
+        )
         
-        // 合并重复事件
-        let mergedEvents = try await eventStore.mergeDuplicateEvents()
+        let event3 = eventStore.createMockEvent(
+            title: "测试事件",
+            startDate: Date().addingTimeInterval(3600), // 一小时后
+            calendar: calendar
+        )
+        
+        // 合并事件
+        let mergedEvent = try eventMerger.mergeEvents([event1, event2, event3], into: calendar)
         
         // 验证结果
-        XCTAssertEqual(mergedEvents.count, 1)
-        XCTAssertEqual(mergedEvents[0].title, "Team Meeting")
-        XCTAssertEqual(mergedEvents[0].startDate, event1.startDate)
-        XCTAssertEqual(mergedEvents[0].endDate, event1.endDate)
+        XCTAssertEqual(mergedEvent.title, "测试事件")
+        XCTAssertEqual(mergedEvent.calendar, calendar)
+        XCTAssertEqual(mergedEvent.startDate, event3.startDate) // 应该使用最新的时间
         
-        // 清理
-        try eventStore.remove(event1, span: .thisEvent, commit: true)
+        // 验证 save 和 remove 方法被正确调用
+        XCTAssertEqual(eventStore.savedEvents.count, 1)
+        XCTAssertEqual(eventStore.savedEvents[0].event, mergedEvent)
+        XCTAssertEqual(eventStore.savedEvents[0].span, .futureEvents)
+        
+        XCTAssertEqual(eventStore.removedEvents.count, 2)
+        XCTAssertTrue(eventStore.removedEvents.contains { $0.event === event1 && $0.span == .futureEvents })
+        XCTAssertTrue(eventStore.removedEvents.contains { $0.event === event2 && $0.span == .futureEvents })
     }
     
-    func testMergeDuplicateEventsError() async {
-        // 设置错误标志
-        eventStore.shouldThrowError = true
+    func testMergeRecurringAndNormalEvents() throws {
+        // 创建循环事件
+        let recurringEvent = eventStore.createMockEvent(
+            title: "循环事件",
+            startDate: Date(),
+            calendar: calendar
+        )
+        recurringEvent.recurrenceRules = [EKRecurrenceRule(
+            recurrenceWith: .daily,
+            interval: 1,
+            end: nil
+        )]
         
-        // 验证错误处理
-        do {
-            _ = try await eventStore.mergeDuplicateEvents()
-            XCTFail("Expected error to be thrown")
-        } catch let error as NSError {
-            XCTAssertEqual(error.domain, "MockError")
-            XCTAssertEqual(error.code, -1)
-        }
+        // 创建普通事件
+        let normalEvent = eventStore.createMockEvent(
+            title: "循环事件",
+            startDate: Date().addingTimeInterval(3600),
+            calendar: calendar
+        )
+        
+        // 合并事件
+        let mergedEvent = try eventMerger.mergeEvents([recurringEvent, normalEvent], into: calendar)
+        
+        // 验证结果
+        XCTAssertEqual(mergedEvent.title, "循环事件")
+        XCTAssertEqual(mergedEvent.calendar, calendar)
+        XCTAssertNotNil(mergedEvent.recurrenceRules) // 应该保留循环规则
+        XCTAssertEqual(mergedEvent.startDate, normalEvent.startDate) // 应该使用最新的时间
+        
+        // 验证 save 和 remove 方法被正确调用
+        XCTAssertEqual(eventStore.savedEvents.count, 1)
+        XCTAssertEqual(eventStore.savedEvents[0].event, mergedEvent)
+        XCTAssertEqual(eventStore.savedEvents[0].span, .futureEvents)
+        
+        XCTAssertEqual(eventStore.removedEvents.count, 1)
+        XCTAssertTrue(eventStore.removedEvents.contains { $0.event === recurringEvent && $0.span == .futureEvents })
     }
 } 

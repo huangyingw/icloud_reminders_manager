@@ -1,0 +1,11 @@
+# 运行程序前必须通过所有单元测试
+pre-run:
+  - command: swift test
+    description: 运行所有单元测试
+    blocking: true
+
+# 代码质量规则
+rules:
+  - name: test-coverage
+    description: 所有功能代码都必须有对应的单元测试
+    severity: error 

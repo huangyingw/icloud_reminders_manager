@@ -1,114 +1,92 @@
 import XCTest
 import EventKit
-@testable import Managers
+@testable import icloud_reminders_manager
 
 final class CalendarManagerTests: XCTestCase {
     var eventStore: MockEventStore!
+    var config: Config!
     var calendarManager: CalendarManager!
-    var defaultCalendar: EKCalendar!
+    var iCloudSource: EKSource!
+    var googleSource: EKSource!
     
-    override func setUpWithError() throws {
+    override func setUp() {
+        super.setUp()
+        
+        // 创建 Mock 事件存储
         eventStore = MockEventStore()
         
-        // 创建模拟的 iCloud 源
-        let mockSource = eventStore.createMockSource(title: "iCloud", type: .calDAV)
-        defaultCalendar = eventStore.createMockCalendar(for: .event)
-        defaultCalendar.source = mockSource
+        // 创建 iCloud 源
+        iCloudSource = eventStore.createMockSource(title: "iCloud", type: .calDAV)
         
-        calendarManager = CalendarManager(eventStore: eventStore)
+        // 创建 Google 源
+        googleSource = eventStore.createMockSource(title: "Google", type: .calDAV)
+        
+        // 创建配置
+        config = Config()
+        
+        // 创建日历管理器
+        calendarManager = CalendarManager(eventStore: eventStore, config: config)
     }
     
-    override func tearDownWithError() throws {
+    override func tearDown() {
         eventStore = nil
+        config = nil
         calendarManager = nil
-        defaultCalendar = nil
+        iCloudSource = nil
+        googleSource = nil
+        super.tearDown()
     }
     
-    func testMoveExpiredEventToCurrentWeek() async throws {
-        // 创建一个过期的事件
-        let event = eventStore.createMockEvent()
-        event.title = "Expired Event"
-        event.startDate = Calendar.current.date(byAdding: .day, value: -7, to: Date())!
-        event.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: event.startDate)!
-        event.calendar = defaultCalendar
-        try eventStore.save(event, span: .thisEvent, commit: true)
+    func testGetSourceCalendars() {
+        // 创建源日历
+        let sourceCalendar1 = eventStore.createMockCalendar(for: .event, title: "工作", source: iCloudSource)
+        let sourceCalendar2 = eventStore.createMockCalendar(for: .event, title: "家庭", source: iCloudSource)
         
-        // 移动事件到当前周
-        try await calendarManager.moveExpiredEventToCurrentWeek(event)
+        // 创建目标日历（不应该包含在源日历中）
+        _ = eventStore.createMockCalendar(for: .event, title: "个人", source: iCloudSource)
         
-        // 验证事件已被移动到当前周
-        let currentWeekday = Calendar.current.component(.weekday, from: event.startDate)
-        let targetWeekday = Calendar.current.component(.weekday, from: Date())
-        XCTAssertEqual(currentWeekday, targetWeekday)
-        
-        // 验证事件的时间部分保持不变
-        let originalHour = Calendar.current.component(.hour, from: event.startDate)
-        let originalMinute = Calendar.current.component(.minute, from: event.startDate)
-        let newHour = Calendar.current.component(.hour, from: event.startDate)
-        let newMinute = Calendar.current.component(.minute, from: event.startDate)
-        
-        XCTAssertEqual(originalHour, newHour)
-        XCTAssertEqual(originalMinute, newMinute)
-        
-        // 清理
-        try eventStore.remove(event, span: .thisEvent, commit: true)
-    }
-    
-    func testDeleteExpiredRecurringEvents() async throws {
-        // 创建一个过期的循环事件
-        let expiredEvent = eventStore.createMockEvent()
-        expiredEvent.title = "Expired Recurring Event"
-        expiredEvent.startDate = Calendar.current.date(byAdding: .month, value: -2, to: Date())!
-        expiredEvent.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: expiredEvent.startDate)!
-        expiredEvent.calendar = defaultCalendar
-        expiredEvent.recurrenceRules = [
-            EKRecurrenceRule(
-                recurrenceWith: .weekly,
-                interval: 1,
-                end: .init(end: Calendar.current.date(byAdding: .month, value: -1, to: Date())!)
-            )
-        ]
-        try eventStore.save(expiredEvent, span: .thisEvent, commit: true)
-        
-        // 创建一个未过期的循环事件
-        let activeEvent = eventStore.createMockEvent()
-        activeEvent.title = "Active Recurring Event"
-        activeEvent.startDate = Date()
-        activeEvent.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: activeEvent.startDate)!
-        activeEvent.calendar = defaultCalendar
-        activeEvent.recurrenceRules = [
-            EKRecurrenceRule(
-                recurrenceWith: .weekly,
-                interval: 1,
-                end: .init(end: Calendar.current.date(byAdding: .month, value: 1, to: Date())!)
-            )
-        ]
-        try eventStore.save(activeEvent, span: .thisEvent, commit: true)
-        
-        // 删除过期的循环事件
-        try await calendarManager.deleteExpiredRecurringEvents()
+        // 获取源日历
+        let sourceCalendars = calendarManager.getSourceCalendars()
         
         // 验证结果
-        XCTAssertFalse(eventStore.mockEvents.contains(expiredEvent))
-        XCTAssertTrue(eventStore.mockEvents.contains(activeEvent))
-        
-        // 清理
-        try eventStore.remove(activeEvent, span: .thisEvent, commit: true)
+        XCTAssertEqual(sourceCalendars.count, 2)
+        XCTAssertTrue(sourceCalendars.contains(sourceCalendar1))
+        XCTAssertTrue(sourceCalendars.contains(sourceCalendar2))
     }
     
-    func testMoveExpiredEventError() async {
-        // 设置错误标志
-        eventStore.shouldThrowError = true
+    func testGetTargetCalendar() {
+        // 创建目标日历
+        let targetCalendar = eventStore.createMockCalendar(for: .event, title: "个人", source: iCloudSource)
         
-        let event = eventStore.createMockEvent()
+        // 获取目标日历
+        let result = calendarManager.getTargetCalendar()
         
-        // 验证错误处理
-        do {
-            try await calendarManager.moveExpiredEventToCurrentWeek(event)
-            XCTFail("Expected error to be thrown")
-        } catch let error as NSError {
-            XCTAssertEqual(error.domain, "MockError")
-            XCTAssertEqual(error.code, -1)
-        }
+        // 验证结果
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result?.title, "个人")
+        XCTAssertEqual(result?.source, iCloudSource)
+    }
+    
+    func testMoveEventToTargetCalendar() throws {
+        // 创建源日历和目标日历
+        let sourceCalendar = eventStore.createMockCalendar(for: .event, title: "工作", source: iCloudSource)
+        let targetCalendar = eventStore.createMockCalendar(for: .event, title: "个人", source: iCloudSource)
+        
+        // 创建测试事件
+        let event = eventStore.createMockEvent(title: "测试事件", startDate: Date(), calendar: sourceCalendar)
+        
+        // 验证事件的初始日历
+        XCTAssertEqual(event.calendar, sourceCalendar)
+        
+        // 尝试移动事件
+        try calendarManager.moveEventToTargetCalendar(event, targetCalendar: targetCalendar)
+        
+        // 验证事件的目标日历已被设置
+        XCTAssertEqual(event.calendar, targetCalendar)
+        
+        // 验证 save 方法被正确调用
+        XCTAssertEqual(eventStore.savedEvents.count, 1)
+        XCTAssertEqual(eventStore.savedEvents[0].event, event)
+        XCTAssertEqual(eventStore.savedEvents[0].span, .thisEvent)
     }
 } 
