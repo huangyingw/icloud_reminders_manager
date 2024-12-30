@@ -16,6 +16,12 @@ let package = Package(
             name: "icloud_reminders_manager",
             dependencies: [
                 .product(name: "Logging", package: "swift-log")
+            ],
+            resources: [
+                .process("Resources")
+            ],
+            swiftSettings: [
+                .unsafeFlags(["-enable-bare-slash-regex"])
             ]
         ),
         .testTarget(
@@ -23,6 +29,9 @@ let package = Package(
             dependencies: [
                 "icloud_reminders_manager",
                 .product(name: "Logging", package: "swift-log")
+            ],
+            resources: [
+                .process("Resources")
             ]
         )
     ]

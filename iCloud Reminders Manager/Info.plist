@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
     <key>NSCalendarsUsageDescription</key>
-    <string>需要访问日历以管理事件和提醒</string>
+    <string>需要访问日历以管理事件</string>
     <key>NSRemindersUsageDescription</key>
-    <string>需要访问提醒以管理提醒事项</string>
+    <string>需要访问提醒事项以管理提醒</string>
 </dict>
 </plist> 
