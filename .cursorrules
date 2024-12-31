@@ -8,4 +8,32 @@ pre-run:
 rules:
   - name: test-coverage
     description: 所有功能代码都必须有对应的单元测试
+    severity: error
+  
+  - name: code-reuse
+    description: 如果已有代码并且单元测试已通过，不要重写重复的代码
+    severity: error
+
+  - name: commit-control
+    description: 除非明确要求，否则不要提交修改
+    severity: error
+
+  - name: test-code-quality
+    description: 测试代码不应重复功能代码的实现，而应该专注于验证功能代码的结果
+    severity: error
+
+  - name: file-organization
+    description: 代码文件应该按照功能模块组织，避免在不同目录下出现同名文件
+    severity: error
+
+  - name: file-naming
+    description: 同一个项目中不应该出现多个同名的源文件，除非它们在不同的target中且有明确的功能区分
+    severity: error
+
+  - name: project-structure
+    description: 项目结构应该清晰，每个文件都应该有其明确的位置和作用，避免重复或冗余的文件
+    severity: error
+
+  - name: code-separation
+    description: 功能代码和测试代码必须严格分离，功能代码中不能包含测试代码，测试代码中也不能重复实现功能代码
     severity: error 

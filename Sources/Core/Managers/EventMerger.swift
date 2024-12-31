@@ -1,151 +1,151 @@
-import Foundation
 import EventKit
-
-public struct MergeConfiguration {
-    let levenshteinThreshold: Int
-    let timeThreshold: TimeInterval
-    let preferredLocation: String?
-    let preferredURL: URL?
-    
-    public init(
-        levenshteinThreshold: Int = 3,
-        timeThreshold: TimeInterval = 30 * 60,
-        preferredLocation: String? = nil,
-        preferredURL: URL? = nil
-    ) {
-        self.levenshteinThreshold = levenshteinThreshold
-        self.timeThreshold = timeThreshold
-        self.preferredLocation = preferredLocation
-        self.preferredURL = preferredURL
-    }
-}
+import Logging
 
 public class EventMerger {
     private let eventStore: EKEventStore
+    private let config: Config
+    private let logger: Logger
     
-    public init(eventStore: EKEventStore) {
+    public init(eventStore: EKEventStore, config: Config, logger: Logger) {
         self.eventStore = eventStore
+        self.config = config
+        self.logger = logger
     }
     
     public func findDuplicateEvents(_ events: [EKEvent]) -> [[EKEvent]] {
-        var duplicates: [[EKEvent]] = []
+        var duplicateGroups: [[EKEvent]] = []
         var processedEvents = Set<EKEvent>()
         
         for event in events {
-            if processedEvents.contains(event) { continue }
-            
-            var group = [event]
-            for otherEvent in events {
-                if otherEvent === event || processedEvents.contains(otherEvent) { continue }
-                
-                if areSimilarEvents(event, otherEvent) {
-                    group.append(otherEvent)
-                    processedEvents.insert(otherEvent)
-                }
+            if processedEvents.contains(event) {
+                continue
             }
             
-            if group.count > 1 {
-                duplicates.append(group)
+            let duplicates = events.filter { other in
+                !processedEvents.contains(other) &&
+                other.title == event.title &&
+                Calendar.current.isDate(other.startDate, inSameDayAs: event.startDate) &&
+                other !== event
             }
-            processedEvents.insert(event)
+            
+            if !duplicates.isEmpty {
+                let group = [event] + duplicates
+                duplicateGroups.append(group)
+                processedEvents.formUnion(group)
+            } else {
+                processedEvents.insert(event)
+            }
         }
         
-        return duplicates
+        return duplicateGroups
     }
     
-    public func mergeEvents(_ events: [EKEvent], config: MergeConfiguration = MergeConfiguration()) throws -> EKEvent {
-        guard let primaryEvent = events.first else {
-            throw NSError(domain: "EventMerger", code: -1, userInfo: [NSLocalizedDescriptionKey: "No events to merge"])
+    public func mergeEvents(_ events: [EKEvent]) async throws -> [EKEvent] {
+        var result = [EKEvent]()
+        
+        // 按标题分组
+        let groupedEvents = Dictionary(grouping: events) { $0.title ?? "" }
+        
+        // 处理每个组
+        for (_, events) in groupedEvents {
+            guard !events.isEmpty else { continue }
+            
+            // 如果只有一个事件，直接添加到结果中
+            if events.count == 1 {
+                result.append(events[0])
+                continue
+            }
+            
+            // 找出主要事件和重复事件
+            let sortedEvents = events.sorted { $0.startDate < $1.startDate }
+            let primary = sortedEvents[0]
+            let duplicates = Array(sortedEvents.dropFirst())
+            
+            // 合并事件
+            let merged = mergeEvents(primary, duplicates: duplicates)
+            
+            // 保存合并后的事件
+            try eventStore.save(merged, span: .thisEvent)
+            
+            // 删除重复事件
+            for duplicate in duplicates {
+                try eventStore.remove(duplicate, span: .thisEvent)
+            }
+            
+            result.append(merged)
         }
         
-        let mergedEvent = EKEvent(eventStore: eventStore)
-        mergedEvent.title = primaryEvent.title
-        mergedEvent.startDate = primaryEvent.startDate
-        mergedEvent.endDate = events.map { $0.endDate }.max() ?? primaryEvent.endDate
-        mergedEvent.calendar = primaryEvent.calendar
-        
-        // Merge notes
+        return result
+    }
+    
+    private func mergeEvents(_ primary: EKEvent, duplicates: [EKEvent]) -> EKEvent {
+        // 合并备注
         var notes = [String]()
-        for event in events {
-            if let eventNotes = event.notes {
-                notes.append(eventNotes)
-            }
+        if let primaryNotes = primary.notes {
+            notes.append(primaryNotes)
         }
+        
+        for duplicate in duplicates {
+            if let duplicateNotes = duplicate.notes {
+                notes.append(duplicateNotes)
+            }
+            
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateStyle = .medium
+            dateFormatter.timeStyle = .short
+            notes.append("原始时间: \(dateFormatter.string(from: duplicate.startDate))")
+        }
+        
         if !notes.isEmpty {
-            mergedEvent.notes = notes.joined(separator: "\n\n")
+            primary.notes = notes.joined(separator: "\n\n")
         }
         
-        // Merge URL
-        if let preferredURL = config.preferredURL {
-            mergedEvent.url = preferredURL
-            if let primaryURL = primaryEvent.url, primaryURL != preferredURL {
-                mergedEvent.notes = (mergedEvent.notes ?? "") + "\nAlternative URL: \(primaryURL.absoluteString)"
-            }
-        } else {
-            mergedEvent.url = primaryEvent.url
-            for event in events.dropFirst() {
-                if let eventURL = event.url, eventURL != mergedEvent.url {
-                    mergedEvent.notes = (mergedEvent.notes ?? "") + "\nAlternative URL: \(eventURL.absoluteString)"
+        // 复制其他属性（如果有需要）
+        if primary.location == nil {
+            for duplicate in duplicates {
+                if let location = duplicate.location {
+                    primary.location = location
+                    break
                 }
             }
         }
         
-        // Merge location
-        if let preferredLocation = config.preferredLocation {
-            mergedEvent.location = preferredLocation
-            if let primaryLocation = primaryEvent.location, primaryLocation != preferredLocation {
-                mergedEvent.notes = (mergedEvent.notes ?? "") + "\nAlternative location: \(primaryLocation)"
-            }
-        } else {
-            mergedEvent.location = primaryEvent.location
-            for event in events.dropFirst() {
-                if let eventLocation = event.location, eventLocation != mergedEvent.location {
-                    mergedEvent.notes = (mergedEvent.notes ?? "") + "\nAlternative location: \(eventLocation)"
+        if primary.url == nil {
+            for duplicate in duplicates {
+                if let url = duplicate.url {
+                    primary.url = url
+                    break
                 }
             }
         }
         
-        // Merge alarms
-        var alarms = Set<EKAlarm>()
-        for event in events {
-            if let eventAlarms = event.alarms {
-                alarms.formUnion(eventAlarms)
-            }
-        }
-        mergedEvent.alarms = Array(alarms)
-        
-        // Merge recurrence rules
-        if let primaryRule = primaryEvent.recurrenceRules?.first {
-            mergedEvent.recurrenceRules = [primaryRule]
+        // 将事件移动到目标日历
+        let calendars = eventStore.calendars(for: .event)
+        if let targetCalendar = calendars.first(where: { $0.title == config.targetCalendarName }) {
+            primary.calendar = targetCalendar
         }
         
-        try eventStore.save(mergedEvent, span: .thisEvent, commit: true)
-        return mergedEvent
+        return primary
     }
     
-    private func areSimilarEvents(_ event1: EKEvent, _ event2: EKEvent) -> Bool {
-        // Check titles
-        let title1 = event1.title ?? ""
-        let title2 = event2.title ?? ""
-        let titleDistance = levenshteinDistance(title1, title2)
+    public func mergeDuplicateEvents(_ events: [EKEvent]) async throws -> [EKEvent] {
+        // 按标题分组
+        let groupedEvents = Dictionary(grouping: events) { $0.title ?? "" }
+        var result: [EKEvent] = []
         
-        // Check times
-        let timeDistance = abs(event1.startDate.timeIntervalSince(event2.startDate))
-        
-        return titleDistance <= 3 && timeDistance <= 30 * 60
-    }
-    
-    private func levenshteinDistance(_ s1: String, _ s2: String) -> Int {
-        let empty = Array(repeating: 0, count: s2.count + 1)
-        var last = Array(0...s2.count)
-        
-        for (i, c1) in s1.enumerated() {
-            var cur = [i + 1] + empty
-            for (j, c2) in s2.enumerated() {
-                cur[j + 1] = c1 == c2 ? last[j] : min(last[j], last[j + 1], cur[j]) + 1
+        // 处理每组事件
+        for (_, eventsWithSameTitle) in groupedEvents {
+            // 如果只有一个事件，保留它
+            if eventsWithSameTitle.count == 1 {
+                result.append(eventsWithSameTitle[0])
+                continue
             }
-            last = cur
+            
+            // 合并事件
+            let mergedEvents = try await mergeEvents(eventsWithSameTitle)
+            result.append(contentsOf: mergedEvents)
         }
-        return last[s2.count]
+        
+        return result
     }
 } 

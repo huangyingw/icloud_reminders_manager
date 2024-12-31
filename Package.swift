@@ -8,31 +8,38 @@ let package = Package(
     platforms: [
         .macOS(.v13)
     ],
+    products: [
+        .library(
+            name: "Core",
+            targets: ["Core"]),
+        .library(
+            name: "TestHelpers",
+            targets: ["TestHelpers"]),
+        .executable(
+            name: "CLI",
+            targets: ["CLI"])
+    ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0")
     ],
     targets: [
+        .target(
+            name: "Core",
+            dependencies: [
+                .product(name: "Logging", package: "swift-log")
+            ]),
+        .target(
+            name: "TestHelpers",
+            dependencies: ["Core"]),
         .executableTarget(
-            name: "icloud_reminders_manager",
-            dependencies: [
-                .product(name: "Logging", package: "swift-log")
-            ],
-            resources: [
-                .process("Resources")
-            ],
-            swiftSettings: [
-                .unsafeFlags(["-enable-bare-slash-regex"])
-            ]
-        ),
+            name: "CLI",
+            dependencies: ["Core"],
+            exclude: ["Info.plist"]),
         .testTarget(
-            name: "icloud_reminders_managerTests",
-            dependencies: [
-                "icloud_reminders_manager",
-                .product(name: "Logging", package: "swift-log")
-            ],
+            name: "CoreTests",
+            dependencies: ["Core", "TestHelpers"],
             resources: [
                 .process("Resources")
-            ]
-        )
+            ])
     ]
 )

@@ -1,0 +1,8 @@
+{
+    "calendar": {
+        "target_calendar_name": "个人"
+    },
+    "reminder": {
+        "list_names": ["提醒事项", "待办事项"]
+    }
+} 
