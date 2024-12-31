@@ -29,11 +29,13 @@ public class App {
     
     // 处理过期事件
     public func processExpiredEvents() async throws {
+        logger.info("开始处理过期事件")
+        
         // 获取所有 iCloud 日历
         let iCloudCalendars = calendarManager.getICloudCalendars()
         logger.info("找到 \(iCloudCalendars.count) 个 iCloud 日历")
         
-        // 处理每个日历中的过期事件
+        // 遍历每个日历
         for calendar in iCloudCalendars {
             logger.info("处理日历：\(calendar.title)")
             let events = try await calendarManager.getEvents(in: calendar)
@@ -41,11 +43,23 @@ public class App {
             
             // 将过期事件移动到目标日历
             for event in events {
-                if event.startDate < Date() {
+                // 跳过重复事件，因为它们可能还有未来的实例
+                if event.hasRecurrenceRules {
+                    logger.info("跳过重复事件：\(event.title ?? "未命名事件")")
+                    continue
+                }
+                
+                // 检查事件是否已经结束
+                if event.endDate < Date() {
+                    logger.info("移动过期事件：\(event.title ?? "未命名事件")")
                     try await calendarManager.moveEventToTargetCalendar(event)
+                } else {
+                    logger.debug("跳过未过期事件：\(event.title ?? "未命名事件")")
                 }
             }
         }
+        
+        logger.info("过期事件处理完成")
     }
     
     // 处理过期提醒
