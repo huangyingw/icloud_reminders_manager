@@ -4,11 +4,11 @@ import Logging
 @testable import Core
 
 final class LoggerTests: XCTestCase {
-    var logger: Core.Logger!
+    var logger: FileLogger!
     
     override func setUp() {
         super.setUp()
-        logger = Core.Logger()
+        logger = FileLogger(label: "test.logger")
     }
     
     override func tearDown() {

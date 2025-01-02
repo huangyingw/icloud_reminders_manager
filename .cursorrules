@@ -36,4 +36,8 @@ rules:
 
   - name: code-separation
     description: 功能代码和测试代码必须严格分离，功能代码中不能包含测试代码，测试代码中也不能重复实现功能代码
-    severity: error 
+    severity: error
+
+  - name: calendar-access
+    description: 日历访问授权问题由用户自行处理，不需要在代码中处理
+    severity: info 

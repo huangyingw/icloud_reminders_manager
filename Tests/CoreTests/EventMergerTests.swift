@@ -1,75 +1,71 @@
 import XCTest
 import EventKit
-import Logging
 @testable import Core
 
 final class EventMergerTests: XCTestCase {
     var eventStore: MockEventStore!
     var config: Config!
+    var logger: FileLogger!
     var eventMerger: EventMerger!
-    var logger: Logger!
-    var testCalendar: EKCalendar!
-    var targetCalendar: EKCalendar!
     
-    override func setUp() async throws {
-        try await super.setUp()
+    override func setUp() {
+        super.setUp()
         eventStore = MockEventStore()
-        config = Config(targetCalendarName: "个人日历")
-        logger = Logger(label: "test")
-        eventMerger = EventMerger(eventStore: eventStore, config: config, logger: logger)
+        config = Config(
+            calendar: CalendarConfig(targetCalendarName: "个人"),
+            reminder: ReminderConfig(listNames: ["提醒事项"])
+        )
+        logger = FileLogger(label: "test.logger")
         
-        // 创建一个本地日历源
-        let source = MockSource()
-        source.setTitle("本地")
-        source.setSourceType(.local)
-        eventStore.addMockSource(source)
+        // 创建 iCloud 源
+        let iCloudSource = eventStore.createMockSource(title: "iCloud", type: .calDAV)
         
-        // 创建测试日历
-        testCalendar = EKCalendar(for: .event, eventStore: eventStore)
-        testCalendar.title = "测试日历"
-        testCalendar.source = source
-        eventStore.addMockCalendar(testCalendar)
+        // 创建日历
+        let calendar = eventStore.createMockCalendar(title: "测试日历", type: .event)
+        calendar.setValue(iCloudSource, forKey: "source")
         
-        // 创建目标日历
-        targetCalendar = EKCalendar(for: .event, eventStore: eventStore)
-        targetCalendar.title = "个人日历"
-        targetCalendar.source = source
-        eventStore.addMockCalendar(targetCalendar)
+        eventMerger = EventMerger(logger: logger)
     }
     
-    override func tearDown() async throws {
-        try await super.tearDown()
-        eventStore.clearMocks()
+    override func tearDown() {
         eventStore = nil
         config = nil
-        eventMerger = nil
         logger = nil
-        testCalendar = nil
-        targetCalendar = nil
+        eventMerger = nil
+        super.tearDown()
     }
     
-    func testMergeEvents() async throws {
-        // 创建两个相似的事件
-        let event1 = EKEvent(eventStore: eventStore)
-        event1.title = "测试事件"
-        event1.startDate = Date()
-        event1.endDate = event1.startDate.addingTimeInterval(3600)
-        event1.calendar = testCalendar
-        try eventStore.save(event1, span: .thisEvent)
+    func testMergeDuplicateEvents() async throws {
+        // 创建重复事件
+        let calendar = eventStore.createMockCalendar(title: "测试日历", type: .event)
+        let startDate = Date()
         
-        let event2 = EKEvent(eventStore: eventStore)
-        event2.title = "测试事件"
-        event2.startDate = event1.startDate
-        event2.endDate = event1.endDate
-        event2.calendar = targetCalendar
-        try eventStore.save(event2, span: .thisEvent)
+        let event1 = eventStore.createMockEvent(title: "重复事件", startDate: startDate, calendar: calendar)
+        let event2 = eventStore.createMockEvent(title: "重复事件", startDate: startDate, calendar: calendar)
+        let event3 = eventStore.createMockEvent(title: "重复事件", startDate: startDate, calendar: calendar)
         
-        // 合并事件
-        let events = [event1, event2]
-        let mergedEvents = try await eventMerger.mergeEvents(events)
+        // 合并重复事件
+        let mergedEvents = try await eventMerger.mergeDuplicateEvents([event1, event2, event3])
         
         // 验证结果
         XCTAssertEqual(mergedEvents.count, 1, "应该只剩下一个事件")
-        XCTAssertEqual(mergedEvents.first?.calendar.title, "个人日历", "事件应该被移动到目标日历")
+        XCTAssertEqual(mergedEvents[0].title, "重复事件", "事件标题应该保持不变")
+    }
+    
+    func testMergeDifferentEvents() async throws {
+        // 创建不同标题的事件
+        let calendar = eventStore.createMockCalendar(title: "测试日历", type: .event)
+        let startDate = Date()
+        
+        let event1 = eventStore.createMockEvent(title: "事件1", startDate: startDate, calendar: calendar)
+        let event2 = eventStore.createMockEvent(title: "事件2", startDate: startDate, calendar: calendar)
+        
+        // 合并事件
+        let mergedEvents = try await eventMerger.mergeDuplicateEvents([event1, event2])
+        
+        // 验证结果 - 不同标题的事件不应该被合并
+        XCTAssertEqual(mergedEvents.count, 2, "不同标题的事件不应该被合并")
+        XCTAssertTrue(mergedEvents.contains { $0.title == "事件1" })
+        XCTAssertTrue(mergedEvents.contains { $0.title == "事件2" })
     }
 } 

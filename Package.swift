@@ -30,14 +30,21 @@ let package = Package(
             ]),
         .target(
             name: "TestHelpers",
-            dependencies: ["Core"]),
+            dependencies: [
+                .target(name: "Core")
+            ]),
         .executableTarget(
             name: "CLI",
-            dependencies: ["Core"],
+            dependencies: [
+                .target(name: "Core")
+            ],
             exclude: ["Info.plist"]),
         .testTarget(
             name: "CoreTests",
-            dependencies: ["Core", "TestHelpers"],
+            dependencies: [
+                .target(name: "Core"),
+                .target(name: "TestHelpers")
+            ],
             resources: [
                 .process("Resources")
             ])

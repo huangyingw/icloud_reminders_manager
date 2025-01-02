@@ -1,20 +1,22 @@
 import Core
 import EventKit
-import Logging
+import Foundation
 
 // 创建日志记录器
-var logger = Logging.Logger(label: "com.example.icloud_reminders_manager")
-logger.logLevel = .info
+let logger = FileLogger(label: "com.example.icloud_reminders_manager")
 
-// 创建配置
-let config = Config(targetCalendarName: "个人")
+// 加载配置
+let config = try Config.load()
+
+// 创建事件存储
+let eventStore = EKEventStore()
 
 // 创建应用
-let app = App(config: config, logger: logger)
+let app = App(config: config, eventStore: eventStore, logger: logger)
 
 do {
-    // 运行应用
     try await app.run()
 } catch {
     logger.error("运行失败: \(error)")
+    exit(1)
 } 
