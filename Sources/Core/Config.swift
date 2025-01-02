@@ -21,7 +21,7 @@ public struct Config: Codable {
     }
     
     public static func load() throws -> Config {
-        let configURL = URL(fileURLWithPath: "config.json")
+        let configURL = URL(fileURLWithPath: "Sources/Core/config.json")
         let data = try Data(contentsOf: configURL)
         let decoder = JSONDecoder()
         return try decoder.decode(Config.self, from: data)

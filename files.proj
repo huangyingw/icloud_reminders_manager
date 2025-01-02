@@ -19,6 +19,7 @@
 "./Sources/Core/Managers/RemindersManager.swift"
 "./Sources/Core/Models/AppError.swift"
 "./Sources/Core/Models/Reminder.swift"
+"./Sources/Core/config.json"
 "./Sources/TestHelpers/TestHelpers.swift"
 "./Tests/CoreTests/AppTests.swift"
 "./Tests/CoreTests/CalendarAccountManagerTests.swift"
