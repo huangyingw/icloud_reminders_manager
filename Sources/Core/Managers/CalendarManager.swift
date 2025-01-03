@@ -74,61 +74,133 @@ public class CalendarManager {
         logger.info("日历类型: \(targetCalendar.type.rawValue)")
         logger.info("日历来源: \(targetCalendar.source?.title ?? "未知")")
         
-        // 尝试直接获取所有事件进行对比
-        let allEvents = eventStore.calendars(for: .event)
-            .flatMap { calendar -> [EKEvent] in
-                let pred = eventStore.predicateForEvents(withStart: oneYearAgo, end: oneYearLater, calendars: [calendar])
-                return eventStore.events(matching: pred)
-            }
-        logger.info("系统中所有日历的事件总数: \(allEvents.count)")
+        // 按标题分组事件，用于处理重复事件
+        var eventGroups: [String: [EKEvent]] = [:]
+        var emptyEvents: [EKEvent] = []
         
+        // 第一遍遍历：分类事件
         for event in targetEvents {
-            logger.info("检查事件: '\(event.title ?? "未命名事件")'")
-            logger.info("- 开始时间: \(String(describing: event.startDate))")
-            logger.info("- 结束时间: \(String(describing: event.endDate))")
-            logger.info("- 所属日历: \(event.calendar.title)")
-            logger.info("- 事件ID: \(event.eventIdentifier ?? "无ID")")
+            // 检查是否为空白事件
+            if event.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+                emptyEvents.append(event)
+                logger.info("发现空白事件，将被删除")
+                continue
+            }
             
-            if event.startDate < Date() {
-                logger.info("- 事件已过期，准备移动到本周的相同时间")
+            // 按标题分组
+            let title = event.title ?? ""
+            if eventGroups[title] == nil {
+                eventGroups[title] = []
+            }
+            eventGroups[title]?.append(event)
+        }
+        
+        // 删除空白事件
+        for event in emptyEvents {
+            try eventStore.remove(event, span: .thisEvent)
+            logger.info("已删除空白事件")
+        }
+        
+        // 处理重复事件
+        for (title, events) in eventGroups {
+            if events.count > 1 {
+                logger.info("发现标题为 '\(title)' 的重复事件，共 \(events.count) 个")
                 
-                // 创建新事件
-                let newEvent = EKEvent(eventStore: eventStore)
-                newEvent.title = event.title
+                // 按开始时间排序
+                let sortedEvents = events.sorted { $0.startDate < $1.startDate }
                 
-                // 调整过期事件的日期到当前这个星期的同一天同一时间
-                let (adjustedStartDate, adjustedEndDate) = adjustEventDates(startDate: event.startDate, endDate: event.endDate)
-                newEvent.startDate = adjustedStartDate
-                newEvent.endDate = adjustedEndDate
-                
-                logger.info("- 调整后的开始时间: \(adjustedStartDate)")
-                logger.info("- 调整后的结束时间: \(adjustedEndDate)")
-                
-                newEvent.calendar = targetCalendar
-                
-                // 复制其他属性
-                newEvent.notes = event.notes
-                newEvent.location = event.location
-                newEvent.url = event.url
-                newEvent.isAllDay = event.isAllDay
-                
-                // 复制重复规则
-                if let rules = event.recurrenceRules {
-                    newEvent.recurrenceRules = rules
-                    logger.info("- 复制了重复规则")
+                // 保留最新的事件，删除其他事件
+                for event in sortedEvents.dropLast() {
+                    try eventStore.remove(event, span: .thisEvent)
+                    logger.info("已删除重复事件: '\(title)'")
                 }
                 
-                // 保存新事件
-                try eventStore.save(newEvent, span: .thisEvent)
-                logger.info("- 已创建新事件")
-                
-                // 删除原事件
-                try eventStore.remove(event, span: .thisEvent)
-                logger.info("- 已删除原事件")
-                
-                logger.info("已将过期事件 '\(event.title ?? "未命名事件")' 移动到本周的相同时间")
-            } else {
-                logger.info("- 事件未过期，无需处理")
+                // 获取保留的事件
+                if let latestEvent = sortedEvents.last {
+                    // 如果是过期事件，移动到本周
+                    if latestEvent.startDate < Date() {
+                        logger.info("保留的事件已过期，准备移动到本周的相同时间")
+                        
+                        // 创建新事件
+                        let newEvent = EKEvent(eventStore: eventStore)
+                        newEvent.title = latestEvent.title
+                        
+                        // 调整过期事件的日期到当前这个星期的同一天同一时间
+                        let (adjustedStartDate, adjustedEndDate) = adjustEventDates(startDate: latestEvent.startDate, endDate: latestEvent.endDate)
+                        newEvent.startDate = adjustedStartDate
+                        newEvent.endDate = adjustedEndDate
+                        
+                        logger.info("- 调整后的开始时间: \(adjustedStartDate)")
+                        logger.info("- 调整后的结束时间: \(adjustedEndDate)")
+                        
+                        newEvent.calendar = targetCalendar
+                        
+                        // 复制其他属性
+                        newEvent.notes = latestEvent.notes
+                        newEvent.location = latestEvent.location
+                        newEvent.url = latestEvent.url
+                        newEvent.isAllDay = latestEvent.isAllDay
+                        
+                        // 复制重复规则
+                        if let rules = latestEvent.recurrenceRules {
+                            newEvent.recurrenceRules = rules
+                            logger.info("- 复制了重复规则")
+                        }
+                        
+                        // 保存新事件
+                        try eventStore.save(newEvent, span: .thisEvent)
+                        logger.info("- 已创建新事件")
+                        
+                        // 删除原事件
+                        try eventStore.remove(latestEvent, span: .thisEvent)
+                        logger.info("- 已删除原事件")
+                        
+                        logger.info("已将过期事件 '\(latestEvent.title ?? "未命名事件")' 移动到本周的相同时间")
+                    }
+                }
+            } else if let event = events.first {
+                // 单个事件的处理（保持原有的过期事件处理逻辑）
+                if event.startDate < Date() {
+                    logger.info("- 事件已过期，准备移动到本周的相同时间")
+                    
+                    // 创建新事件
+                    let newEvent = EKEvent(eventStore: eventStore)
+                    newEvent.title = event.title
+                    
+                    // 调整过期事件的日期到当前这个星期的同一天同一时间
+                    let (adjustedStartDate, adjustedEndDate) = adjustEventDates(startDate: event.startDate, endDate: event.endDate)
+                    newEvent.startDate = adjustedStartDate
+                    newEvent.endDate = adjustedEndDate
+                    
+                    logger.info("- 调整后的开始时间: \(adjustedStartDate)")
+                    logger.info("- 调整后的结束时间: \(adjustedEndDate)")
+                    
+                    newEvent.calendar = targetCalendar
+                    
+                    // 复制其他属性
+                    newEvent.notes = event.notes
+                    newEvent.location = event.location
+                    newEvent.url = event.url
+                    newEvent.isAllDay = event.isAllDay
+                    
+                    // 复制重复规则
+                    if let rules = event.recurrenceRules {
+                        newEvent.recurrenceRules = rules
+                        logger.info("- 复制了重复规则")
+                    }
+                    
+                    // 保存新事件
+                    try eventStore.save(newEvent, span: .thisEvent)
+                    logger.info("- 已创建新事件")
+                    
+                    // 删除原事件
+                    try eventStore.remove(event, span: .thisEvent)
+                    logger.info("- 已删除原事件")
+                    
+                    logger.info("已将过期事件 '\(event.title ?? "未命名事件")' 移动到本周的相同时间")
+                } else {
+                    logger.info("- 事件未过期，无需处理")
+                }
             }
         }
     }
