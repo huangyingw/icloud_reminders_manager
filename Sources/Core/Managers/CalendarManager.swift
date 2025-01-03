@@ -240,12 +240,14 @@ public class CalendarManager {
     }
     
     private func adjustEventDates(startDate: Date, endDate: Date) -> (Date, Date) {
-        let calendar = Calendar.current
+        // 创建一个以星期一为开始的日历
+        var calendar = Calendar.current
+        calendar.firstWeekday = 2  // 2 代表星期一
         
         // 获取事件的星期几、小时和分钟
         let startComponents = calendar.dateComponents([.weekday, .hour, .minute], from: startDate)
         logger.info("原始事件组件:")
-        logger.info("- 星期几: \(startComponents.weekday ?? 0)")
+        logger.info("- 星期几: \(startComponents.weekday ?? 0)")  // 1=星期日, 2=星期一, ..., 7=星期六
         logger.info("- 小时: \(startComponents.hour ?? 0)")
         logger.info("- 分钟: \(startComponents.minute ?? 0)")
         
@@ -258,7 +260,7 @@ public class CalendarManager {
         logger.info("调整后的组件:")
         logger.info("- 年份周: \(newComponents.yearForWeekOfYear ?? 0)")
         logger.info("- 年内周数: \(newComponents.weekOfYear ?? 0)")
-        logger.info("- 星期几: \(newComponents.weekday ?? 0)")
+        logger.info("- 星期几: \(newComponents.weekday ?? 0)")  // 1=星期日, 2=星期一, ..., 7=星期六
         logger.info("- 小时: \(newComponents.hour ?? 0)")
         logger.info("- 分钟: \(newComponents.minute ?? 0)")
         
