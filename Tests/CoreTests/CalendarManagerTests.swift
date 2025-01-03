@@ -159,4 +159,50 @@ final class CalendarManagerTests: XCTestCase {
         let otherEvents = remainingEvents.filter { $0.title == "不同的事件" }
         XCTAssertEqual(otherEvents.count, 1)
     }
+    
+    func testProcessRecurringEvents() async throws {
+        // 创建一个带有重复规则的循环事件
+        let calendar = mockEventStore.createMockCalendar(title: "Test Calendar", type: .event)
+        let baseDate = Date()
+        
+        // 创建一个每月重复的事件
+        let recurringEvent = mockEventStore.createMockEvent(
+            title: "循环事件",
+            startDate: baseDate,
+            calendar: calendar
+        )
+        
+        // 添加每月重复的规则
+        let recurrenceRule = EKRecurrenceRule(
+            recurrenceWith: .monthly,
+            interval: 1,
+            end: nil
+        )
+        recurringEvent.recurrenceRules = [recurrenceRule]
+        
+        // 创建另一个相同标题但不是循环的事件
+        _ = mockEventStore.createMockEvent(
+            title: "循环事件",
+            startDate: baseDate.addingTimeInterval(86400),
+            calendar: calendar
+        )
+        
+        // 处理事件
+        try await calendarManager.processTargetCalendarEvents()
+        
+        // 验证结果
+        let remainingEvents = mockEventStore.events(matching: mockEventStore.predicateForEvents(
+            withStart: Date.distantPast,
+            end: Date.distantFuture,
+            calendars: [calendar]
+        ))
+        
+        // 应该保留两个事件：循环事件和重复事件
+        XCTAssertEqual(remainingEvents.count, 2, "循环事件和重复事件都应该保留")
+        
+        // 验证循环事件的重复规则被保留
+        let recurringEvents = remainingEvents.filter { $0.recurrenceRules?.isEmpty == false }
+        XCTAssertEqual(recurringEvents.count, 1, "应该有一个循环事件")
+        XCTAssertEqual(recurringEvents.first?.recurrenceRules?.first?.frequency, .monthly, "循环规则应该保持不变")
+    }
 } 
