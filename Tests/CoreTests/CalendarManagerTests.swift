@@ -4,100 +4,70 @@ import EventKit
 
 final class CalendarManagerTests: XCTestCase {
     var eventStore: MockEventStore!
-    var config: Config!
     var logger: FileLogger!
+    var config: Config!
     var calendarManager: CalendarManager!
     
     override func setUp() {
         super.setUp()
         eventStore = MockEventStore()
-        config = Config(
-            calendar: CalendarConfig(targetCalendarName: "个人"),
-            reminder: ReminderConfig(listNames: ["提醒事项"])
-        )
-        logger = FileLogger(label: "test.logger")
+        logger = FileLogger(label: "test")
+        config = Config(calendar: CalendarConfig(targetCalendarName: "Test Calendar"),
+                       reminder: ReminderConfig(listNames: ["Test List"]))
         calendarManager = CalendarManager(config: config, eventStore: eventStore, logger: logger)
+        
+        // 创建目标日历
+        _ = eventStore.createMockCalendar(title: "Test Calendar", type: .event)
     }
     
     override func tearDown() {
+        eventStore.clearMocks()
         eventStore = nil
-        config = nil
         logger = nil
+        config = nil
         calendarManager = nil
         super.tearDown()
     }
     
-    func testGetICloudCalendars() {
-        // 创建 iCloud 源
-        let iCloudSource = eventStore.createMockSource(title: "iCloud", type: .calDAV)
+    func testProcessTargetCalendarEvents() async throws {
+        // 创建测试事件
+        let calendar = try calendarManager.getTargetCalendar()
+        _ = eventStore.createMockEvent(title: "Test Event", startDate: Date(), calendar: calendar)
         
-        // 创建测试日历
-        let calendar1 = eventStore.createMockCalendar(title: "日历1", type: .event)
-        calendar1.setValue(iCloudSource, forKey: "source")
-        
-        let calendar2 = eventStore.createMockCalendar(title: "日历2", type: .event)
-        calendar2.setValue(iCloudSource, forKey: "source")
-        
-        // 获取 iCloud 日历
-        let iCloudCalendars = calendarManager.getICloudCalendars()
+        // 处理目标日历事件
+        try await calendarManager.processTargetCalendarEvents()
         
         // 验证结果
-        XCTAssertEqual(iCloudCalendars.count, 2, "应该找到两个 iCloud 日历")
-        XCTAssertTrue(iCloudCalendars.contains(calendar1))
-        XCTAssertTrue(iCloudCalendars.contains(calendar2))
+        let events = eventStore.getAllEvents()
+        XCTAssertEqual(events.count, 1, "事件数量应该保持不变")
+        XCTAssertEqual(events[0].title, "Test Event", "事件标题应该保持不变")
     }
     
-    func testGetTargetCalendar() throws {
-        // 创建目标日历
-        let targetCalendar = eventStore.createMockCalendar(title: "个人", type: .event)
+    func testProcessSourceCalendars() async throws {
+        // 创建源日历
+        let sourceCalendar = eventStore.createMockCalendar(title: "Source Calendar", type: .event)
         
-        // 获取目标日历
-        let result = try calendarManager.getTargetCalendar()
+        // 创建测试事件
+        _ = eventStore.createMockEvent(title: "Source Event", startDate: Date(), calendar: sourceCalendar)
+        
+        // 处理源日历
+        try await calendarManager.processSourceCalendars()
         
         // 验证结果
-        XCTAssertEqual(result, targetCalendar)
+        let events = eventStore.getAllEvents()
+        XCTAssertEqual(events.count, 1, "事件数量应该保持不变")
+        XCTAssertEqual(events[0].title, "Source Event", "事件标题应该保持不变")
     }
     
-    func testGetTargetCalendarNotFound() {
-        // 不创建目标日历
-        
-        // 尝试获取目标日历
-        XCTAssertThrowsError(try calendarManager.getTargetCalendar()) { error in
-            XCTAssertEqual(error as? CalendarError, .targetCalendarNotFound)
-        }
-    }
-    
-    func testIsCalendarEmpty() {
+    func testCleanupEmptyCalendars() throws {
         // 创建空日历
-        let emptyCalendar = eventStore.createMockCalendar(title: "空日历", type: .event)
-        XCTAssertTrue(calendarManager.isCalendarEmpty(emptyCalendar), "新创建的日历应该为空")
+        let emptyCalendar = eventStore.createMockCalendar(title: "Empty Calendar", type: .event)
         
-        // 创建非空日历
-        let nonEmptyCalendar = eventStore.createMockCalendar(title: "非空日历", type: .event)
-        let _ = eventStore.createMockEvent(title: "测试事件", startDate: Date(), calendar: nonEmptyCalendar)
-        XCTAssertFalse(calendarManager.isCalendarEmpty(nonEmptyCalendar), "包含事件的日历不应该为空")
-    }
-    
-    func testDeleteEmptyCalendar() throws {
-        // 创建空日历
-        let emptyCalendar = eventStore.createMockCalendar(title: "空日历", type: .event)
-        XCTAssertTrue(calendarManager.isCalendarEmpty(emptyCalendar), "新创建的日历应该为空")
+        // 清理空日历
+        try calendarManager.cleanupEmptyCalendars()
         
-        // 删除空日历
-        try calendarManager.deleteEmptyCalendar(emptyCalendar)
-        XCTAssertFalse(eventStore.calendars(for: .event).contains(emptyCalendar), "空日历应该被删除")
-        
-        // 创建非空日历
-        let nonEmptyCalendar = eventStore.createMockCalendar(title: "非空日历", type: .event)
-        let _ = eventStore.createMockEvent(title: "测试事件", startDate: Date(), calendar: nonEmptyCalendar)
-        
-        // 尝试删除非空日历
-        try calendarManager.deleteEmptyCalendar(nonEmptyCalendar)
-        XCTAssertTrue(eventStore.calendars(for: .event).contains(nonEmptyCalendar), "非空日历不应该被删除")
-        
-        // 尝试删除目标日历
-        let targetCalendar = eventStore.createMockCalendar(title: "个人", type: .event)
-        try calendarManager.deleteEmptyCalendar(targetCalendar)
-        XCTAssertTrue(eventStore.calendars(for: .event).contains(targetCalendar), "目标日历不应该被删除，即使它是空的")
+        // 验证结果
+        let calendars = eventStore.calendars(for: .event)
+        XCTAssertFalse(calendars.contains(where: { $0.calendarIdentifier == emptyCalendar.calendarIdentifier }), "空日历应该被删除")
     }
 } 

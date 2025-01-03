@@ -27,6 +27,9 @@ let package = Package(
             name: "Core",
             dependencies: [
                 .product(name: "Logging", package: "swift-log")
+            ],
+            resources: [
+                .process("config.json")
             ]),
         .target(
             name: "TestHelpers",

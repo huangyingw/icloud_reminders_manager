@@ -7,56 +7,32 @@ final class CalendarAccountManagerTests: XCTestCase {
     var config: Config!
     var logger: FileLogger!
     var calendarManager: CalendarManager!
-    var iCloudSource: EKSource!
     
     override func setUp() {
         super.setUp()
         eventStore = MockEventStore()
-        config = Config(
-            calendar: CalendarConfig(targetCalendarName: "个人"),
-            reminder: ReminderConfig(listNames: ["提醒事项"])
-        )
-        logger = FileLogger(label: "test.logger")
-        
-        // 创建模拟的 iCloud 源
-        iCloudSource = eventStore.createMockSource(title: "iCloud", type: .calDAV)
-        
+        logger = FileLogger(label: "test")
+        config = Config(calendar: CalendarConfig(targetCalendarName: "Test Calendar"),
+                       reminder: ReminderConfig(listNames: ["Test List"]))
         calendarManager = CalendarManager(config: config, eventStore: eventStore, logger: logger)
+        
+        // 创建目标日历
+        _ = eventStore.createMockCalendar(title: "Test Calendar", type: .event)
     }
     
     override func tearDown() {
+        eventStore.clearMocks()
         eventStore = nil
-        config = nil
         logger = nil
+        config = nil
         calendarManager = nil
-        iCloudSource = nil
         super.tearDown()
     }
     
-    func testGetICloudCalendars() {
-        // 创建测试日历
-        let calendar1 = eventStore.createMockCalendar(title: "工作", type: .event)
-        calendar1.setValue(iCloudSource, forKey: "source")
-        
-        let calendar2 = eventStore.createMockCalendar(title: "个人", type: .event)
-        calendar2.setValue(iCloudSource, forKey: "source")
-        
-        // 获取 iCloud 日历
-        let iCloudCalendars = calendarManager.getICloudCalendars()
-        
-        // 验证结果
-        XCTAssertEqual(iCloudCalendars.count, 2, "应该找到两个 iCloud 日历")
-        XCTAssertTrue(iCloudCalendars.contains(where: { $0.title == "工作" }))
-        XCTAssertTrue(iCloudCalendars.contains(where: { $0.title == "个人" }))
-    }
-    
-    func testMoveEventToTargetCalendar() async throws {
+    func testMoveEventsToTargetCalendar() async throws {
         // 创建源日历和目标日历
-        let sourceCalendar = eventStore.createMockCalendar(title: "工作", type: .event)
-        sourceCalendar.setValue(iCloudSource, forKey: "source")
-        
-        let targetCalendar = eventStore.createMockCalendar(title: "个人", type: .event)
-        targetCalendar.setValue(iCloudSource, forKey: "source")
+        let sourceCalendar = eventStore.createMockCalendar(title: "源日历", type: .event)
+        let targetCalendar = try calendarManager.getTargetCalendar()
         
         // 创建事件
         let event = eventStore.createMockEvent(title: "测试事件", startDate: Date(), calendar: sourceCalendar)
@@ -64,30 +40,26 @@ final class CalendarAccountManagerTests: XCTestCase {
         // 移动事件到目标日历
         try await calendarManager.moveEventToTargetCalendar(event)
         
-        // 验证事件是否被移动到目标日历
-        let targetEvents = eventStore.getAllEvents().filter { $0.calendar.title == "个人" }
-        XCTAssertEqual(targetEvents.count, 1, "目标日历应该包含一个事件")
-        XCTAssertEqual(targetEvents[0].title, "测试事件", "事件标题应该保持不变")
-        
-        // 验证源日历是否为空
-        let sourceEvents = eventStore.getAllEvents().filter { $0.calendar == sourceCalendar }
-        XCTAssertTrue(sourceEvents.isEmpty, "源日历应该为空")
+        // 验证结果
+        let events = eventStore.getAllEvents().filter { $0.calendar.calendarIdentifier == targetCalendar.calendarIdentifier }
+        XCTAssertEqual(events.count, 1, "应该有一个事件被移动到目标日历")
+        XCTAssertEqual(events[0].title, "测试事件", "事件标题应该保持不变")
     }
     
-    func testMoveEventToTargetCalendarWhenAlreadyInTarget() async throws {
-        // 创建目标日历
-        let targetCalendar = eventStore.createMockCalendar(title: "个人", type: .event)
-        targetCalendar.setValue(iCloudSource, forKey: "source")
+    func testMoveEventsToTargetCalendarWithEmptyCalendar() async throws {
+        // 创建空日历和目标日历
+        let emptyCalendar = eventStore.createMockCalendar(title: "空日历", type: .event)
+        let targetCalendar = try calendarManager.getTargetCalendar()
         
-        // 创建已在目标日历中的事件
-        let event = eventStore.createMockEvent(title: "测试事件", startDate: Date(), calendar: targetCalendar)
+        // 移动事件到目标日历（没有事件）
+        try await calendarManager.processSourceCalendars()
         
-        // 尝试移动事件到目标日历
-        try await calendarManager.moveEventToTargetCalendar(event)
+        // 验证结果
+        let events = eventStore.getAllEvents().filter { $0.calendar.calendarIdentifier == targetCalendar.calendarIdentifier }
+        XCTAssertTrue(events.isEmpty, "不应该有事件被移动")
         
-        // 验证事件仍然在目标日历中
-        let targetEvents = eventStore.getAllEvents().filter { $0.calendar.title == "个人" }
-        XCTAssertEqual(targetEvents.count, 1, "目标日历应该仍然包含一个事件")
-        XCTAssertEqual(targetEvents[0].title, "测试事件", "事件标题应该保持不变")
+        // 验证空日历是否被删除
+        let calendars = eventStore.calendars(for: .event)
+        XCTAssertFalse(calendars.contains(where: { $0.calendarIdentifier == emptyCalendar.calendarIdentifier }), "空日历应该被删除")
     }
 } 

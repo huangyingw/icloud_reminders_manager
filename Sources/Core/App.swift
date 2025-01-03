@@ -8,7 +8,6 @@ public class App {
     private let logger: FileLogger
     private let calendarManager: CalendarManager
     private let remindersManager: RemindersManager
-    private let eventMerger: EventMerger
     
     public init(config: Config, eventStore: EKEventStore, logger: FileLogger) {
         self.config = config
@@ -16,7 +15,6 @@ public class App {
         self.logger = logger
         self.calendarManager = CalendarManager(config: config, eventStore: eventStore, logger: logger)
         self.remindersManager = RemindersManager(config: config, eventStore: eventStore, logger: logger)
-        self.eventMerger = EventMerger(logger: logger)
     }
     
     public func run() async throws {
@@ -29,37 +27,24 @@ public class App {
             logger.info("- \(calendar.title)")
         }
         
-        // 获取目标日历
-        let targetCalendar = try calendarManager.getTargetCalendar()
-        logger.info("\n目标日历: \(targetCalendar.title)")
+        // 处理目标日历中的事件
+        logger.info("\n处理目标日历中的事件...")
+        try await calendarManager.processTargetCalendarEvents()
         
-        // 处理每个源日历中的事件
-        for sourceCalendar in iCloudCalendars {
-            // 跳过目标日历
-            if sourceCalendar.title == config.calendar.targetCalendarName {
-                continue
-            }
-            
-            logger.info("\n处理日历: \(sourceCalendar.title)")
-            
-            // 获取所有事件
-            let predicate = eventStore.predicateForEvents(withStart: Date.distantPast, end: Date.distantFuture, calendars: [sourceCalendar])
-            let events = eventStore.events(matching: predicate)
-            
-            // 移动事件到目标日历
-            for event in events {
-                try await calendarManager.moveEventToTargetCalendar(event)
-            }
-            
-            // 如果日历为空，删除它
-            if calendarManager.isCalendarEmpty(sourceCalendar) {
-                try calendarManager.deleteEmptyCalendar(sourceCalendar)
-            }
-        }
+        // 处理其他日历中的事件
+        try await calendarManager.processSourceCalendars()
         
-        // 处理提醒事项
-        try await remindersManager.run()
+        // 处理过期提醒
+        try await remindersManager.processExpiredReminders()
         
         logger.info("\n处理完成")
+    }
+    
+    private func getTargetCalendar() throws -> EKCalendar {
+        let calendars = eventStore.calendars(for: .event)
+        guard let targetCalendar = calendars.first(where: { $0.title == config.calendar.targetCalendarName }) else {
+            throw CalendarError.targetCalendarNotFound
+        }
+        return targetCalendar
     }
 } 

@@ -13,6 +13,10 @@ public class RemindersManager {
     }
     
     public func run() async throws {
+        try await processExpiredReminders()
+    }
+    
+    public func processExpiredReminders() async throws {
         // 获取所有提醒事项日历
         let reminderCalendars = eventStore.calendars(for: .reminder)
         

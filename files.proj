@@ -29,6 +29,7 @@
 "./Tests/CoreTests/EventMergerTests.swift"
 "./Tests/CoreTests/LoggerTests.swift"
 "./Tests/CoreTests/MainTests.swift"
+"./Tests/CoreTests/Mocks/MockCalendar.swift"
 "./Tests/CoreTests/Mocks/MockEventStore.swift"
 "./Tests/CoreTests/RemindersManagerTests.swift"
 "./Tests/CoreTests/Resources/config.json"
