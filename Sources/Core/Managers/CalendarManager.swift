@@ -110,12 +110,15 @@ public class CalendarManager {
                 let recurringEvents = events.filter { $0.recurrenceRules?.isEmpty == false }
                 let normalEvents = events.filter { $0.recurrenceRules?.isEmpty ?? true }
                 
-                // 保留所有循环事件
+                // 处理循环事件
                 for event in recurringEvents {
-                    logger.info("保留循环事件: '\(title)'")
+                    logger.info("处理循环事件: '\(title)'")
                     if event.startDate < Date() {
-                        logger.info("循环事件已过期，准备移动到本周的相同时间")
-                        try moveEventToCurrentWeek(event, targetCalendar: targetCalendar)
+                        logger.info("循环事件已过期，准备删除")
+                        try eventStore.remove(event, span: .thisEvent)
+                        logger.info("已删除过期的循环事件")
+                    } else {
+                        logger.info("循环事件未过期，保留")
                     }
                 }
                 
@@ -141,7 +144,18 @@ public class CalendarManager {
                 }
             } else if let event = events.first {
                 // 单个事件的处理
-                if event.startDate < Date() {
+                if event.recurrenceRules?.isEmpty == false {
+                    // 单个循环事件
+                    logger.info("处理单个循环事件: '\(title)'")
+                    if event.startDate < Date() {
+                        logger.info("循环事件已过期，准备删除")
+                        try eventStore.remove(event, span: .thisEvent)
+                        logger.info("已删除过期的循环事件")
+                    } else {
+                        logger.info("循环事件未过期，保留")
+                    }
+                } else if event.startDate < Date() {
+                    // 单个普通事件
                     logger.info("- 事件已过期，准备移动到本周的相同时间")
                     try moveEventToCurrentWeek(event, targetCalendar: targetCalendar)
                 } else {

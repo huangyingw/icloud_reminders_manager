@@ -165,25 +165,40 @@ final class CalendarManagerTests: XCTestCase {
         let calendar = mockEventStore.createMockCalendar(title: "Test Calendar", type: .event)
         let baseDate = Date()
         
-        // 创建一个每月重复的事件
-        let recurringEvent = mockEventStore.createMockEvent(
-            title: "循环事件",
-            startDate: baseDate,
+        // 创建一个过期的每月重复事件
+        let expiredRecurringEvent = mockEventStore.createMockEvent(
+            title: "过期循环事件",
+            startDate: baseDate.addingTimeInterval(-86400 * 30), // 30天前
             calendar: calendar
         )
         
         // 添加每月重复的规则
-        let recurrenceRule = EKRecurrenceRule(
+        let expiredRecurrenceRule = EKRecurrenceRule(
             recurrenceWith: .monthly,
             interval: 1,
             end: nil
         )
-        recurringEvent.recurrenceRules = [recurrenceRule]
+        expiredRecurringEvent.recurrenceRules = [expiredRecurrenceRule]
         
-        // 创建另一个相同标题但不是循环的事件
+        // 创建一个未过期的每月重复事件
+        let activeRecurringEvent = mockEventStore.createMockEvent(
+            title: "未过期循环事件",
+            startDate: baseDate.addingTimeInterval(86400), // 1天后
+            calendar: calendar
+        )
+        
+        // 添加每月重复的规则
+        let activeRecurrenceRule = EKRecurrenceRule(
+            recurrenceWith: .monthly,
+            interval: 1,
+            end: nil
+        )
+        activeRecurringEvent.recurrenceRules = [activeRecurrenceRule]
+        
+        // 创建一个相同标题但不是循环的事件
         _ = mockEventStore.createMockEvent(
-            title: "循环事件",
-            startDate: baseDate.addingTimeInterval(86400),
+            title: "普通重复事件",
+            startDate: baseDate,
             calendar: calendar
         )
         
@@ -197,12 +212,20 @@ final class CalendarManagerTests: XCTestCase {
             calendars: [calendar]
         ))
         
-        // 应该保留两个事件：循环事件和重复事件
-        XCTAssertEqual(remainingEvents.count, 2, "循环事件和重复事件都应该保留")
+        // 应该只保留未过期的循环事件和普通重复事件
+        XCTAssertEqual(remainingEvents.count, 2, "应该只保留未过期的循环事件和普通重复事件")
         
-        // 验证循环事件的重复规则被保留
-        let recurringEvents = remainingEvents.filter { $0.recurrenceRules?.isEmpty == false }
-        XCTAssertEqual(recurringEvents.count, 1, "应该有一个循环事件")
-        XCTAssertEqual(recurringEvents.first?.recurrenceRules?.first?.frequency, .monthly, "循环规则应该保持不变")
+        // 验证过期的循环事件被删除
+        let expiredEvents = remainingEvents.filter { $0.title == "过期循环事件" }
+        XCTAssertEqual(expiredEvents.count, 0, "过期的循环事件应该被删除")
+        
+        // 验证未过期的循环事件被保留
+        let activeEvents = remainingEvents.filter { $0.title == "未过期循环事件" }
+        XCTAssertEqual(activeEvents.count, 1, "未过期的循环事件应该被保留")
+        XCTAssertEqual(activeEvents.first?.recurrenceRules?.first?.frequency, .monthly, "循环规则应该保持不变")
+        
+        // 验证普通重复事件被保留
+        let normalEvents = remainingEvents.filter { $0.title == "普通重复事件" }
+        XCTAssertEqual(normalEvents.count, 1, "普通重复事件应该被保留")
     }
 } 
