@@ -213,7 +213,7 @@ public class CalendarManager {
         newEvent.title = event.title
         
         // 调整过期事件的日期到当前这个星期的同一天同一时间
-        let (adjustedStartDate, adjustedEndDate) = adjustEventDates(startDate: event.startDate, endDate: event.endDate)
+        let (adjustedStartDate, adjustedEndDate) = adjustEventDates(event: event)
         newEvent.startDate = adjustedStartDate
         newEvent.endDate = adjustedEndDate
         
@@ -239,40 +239,47 @@ public class CalendarManager {
         logger.info("已将事件 '\(event.title ?? "未命名事件")' 从 '\(event.calendar.title)' 移动到 '\(targetCalendar.title)'")
     }
     
-    private func adjustEventDates(startDate: Date, endDate: Date) -> (Date, Date) {
-        // 创建一个以星期一为开始的日历
+    private func adjustEventDates(event: EKEvent) -> (startDate: Date, endDate: Date) {
+        // 获取事件的日历组件
         var calendar = Calendar.current
-        calendar.firstWeekday = 2  // 2 代表星期一
+        calendar.firstWeekday = 2  // 星期一为一周的第一天
         
-        // 获取事件的星期几、小时和分钟
-        let startComponents = calendar.dateComponents([.weekday, .hour, .minute], from: startDate)
+        let eventComponents = calendar.dateComponents([.weekday, .hour, .minute], from: event.startDate)
+        let duration = event.endDate.timeIntervalSince(event.startDate)
+        
+        // 记录调整前的信息
         logger.info("原始事件组件:")
-        logger.info("- 星期几: \(startComponents.weekday ?? 0)")  // 1=星期日, 2=星期一, ..., 7=星期六
-        logger.info("- 小时: \(startComponents.hour ?? 0)")
-        logger.info("- 分钟: \(startComponents.minute ?? 0)")
+        logger.info("- 星期几: \(eventComponents.weekday ?? 0)")
+        logger.info("- 小时: \(eventComponents.hour ?? 0)")
+        logger.info("- 分钟: \(eventComponents.minute ?? 0)")
+        logger.info("事件持续时间: \(duration) 秒")
         
-        // 获取本周的日期
-        var newComponents = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())
-        newComponents.weekday = startComponents.weekday
-        newComponents.hour = startComponents.hour
-        newComponents.minute = startComponents.minute
+        // 获取本周的日期组件
+        let today = Date()
+        let thisWeek = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: today)
         
+        // 计算新的事件日期
+        var newComponents = DateComponents()
+        newComponents.yearForWeekOfYear = thisWeek.yearForWeekOfYear
+        newComponents.weekOfYear = thisWeek.weekOfYear
+        newComponents.weekday = eventComponents.weekday  // 保持原始的星期几
+        newComponents.hour = eventComponents.hour
+        newComponents.minute = eventComponents.minute
+        
+        // 记录调整后的信息
         logger.info("调整后的组件:")
         logger.info("- 年份周: \(newComponents.yearForWeekOfYear ?? 0)")
         logger.info("- 年内周数: \(newComponents.weekOfYear ?? 0)")
-        logger.info("- 星期几: \(newComponents.weekday ?? 0)")  // 1=星期日, 2=星期一, ..., 7=星期六
+        logger.info("- 星期几: \(newComponents.weekday ?? 0)")
         logger.info("- 小时: \(newComponents.hour ?? 0)")
         logger.info("- 分钟: \(newComponents.minute ?? 0)")
         
         // 创建新的开始时间
         let newStartDate = calendar.date(from: newComponents)!
-        
-        // 计算事件持续时间
-        let duration = endDate.timeIntervalSince(startDate)
-        logger.info("事件持续时间: \(duration) 秒")
-        
-        // 创建新的结束时间
         let newEndDate = newStartDate.addingTimeInterval(duration)
+        
+        logger.info("- 调整后的开始时间: \(newStartDate)")
+        logger.info("- 调整后的结束时间: \(newEndDate)")
         
         return (newStartDate, newEndDate)
     }
@@ -283,7 +290,7 @@ public class CalendarManager {
         newEvent.title = event.title
         
         // 调整过期事件的日期到当前这个星期的同一天同一时间
-        let (adjustedStartDate, adjustedEndDate) = adjustEventDates(startDate: event.startDate, endDate: event.endDate)
+        let (adjustedStartDate, adjustedEndDate) = adjustEventDates(event: event)
         newEvent.startDate = adjustedStartDate
         newEvent.endDate = adjustedEndDate
         

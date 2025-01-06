@@ -33,8 +33,29 @@ class MockEventStore: EKEventStore {
     func createMockEvent(title: String, startDate: Date, calendar: EKCalendar) -> EKEvent {
         let event = EKEvent(eventStore: self)
         event.title = title
-        event.startDate = startDate
-        event.endDate = startDate.addingTimeInterval(3600)
+        
+        // 使用日历组件来设置事件的开始时间
+        var cal = Calendar.current
+        cal.firstWeekday = 2  // 星期一为一周的第一天
+        
+        // 获取并保留所有必要的组件
+        var components = cal.dateComponents([.yearForWeekOfYear, .weekOfYear, .weekday, .hour, .minute], from: startDate)
+        
+        // 确保weekday组件被正确保留
+        if let weekday = components.weekday {
+            components.weekday = weekday
+        }
+        
+        // 创建新的日期
+        if let newStartDate = cal.date(from: components) {
+            event.startDate = newStartDate
+            event.endDate = newStartDate.addingTimeInterval(3600)
+        } else {
+            // 如果日期创建失败，使用原始日期
+            event.startDate = startDate
+            event.endDate = startDate.addingTimeInterval(3600)
+        }
+        
         event.calendar = calendar
         mockEvents.append(event)
         return event

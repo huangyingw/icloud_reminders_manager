@@ -68,9 +68,10 @@ final class CalendarManagerEventsTests: XCTestCase {
         let targetCalendar = try calendarManager.getTargetCalendar()
         
         // 创建一个过期的事件（上周三下午3点）
-        let calendar = Calendar.current
+        var calendar = Calendar.current
+        calendar.firstWeekday = 2  // 星期一为一周的第一天
         let lastWeek = calendar.date(byAdding: .weekOfYear, value: -1, to: Date())!
-        var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: lastWeek)
+        var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear, .weekday, .hour, .minute], from: lastWeek)
         components.weekday = 4  // 星期三
         components.hour = 15    // 下午3点
         components.minute = 0
@@ -109,9 +110,10 @@ final class CalendarManagerEventsTests: XCTestCase {
         let targetCalendar = try calendarManager.getTargetCalendar()
         
         // 创建一个过期的事件（上周二下午2点）
-        let calendar = Calendar.current
+        var calendar = Calendar.current
+        calendar.firstWeekday = 2  // 星期一为一周的第一天
         let lastWeek = calendar.date(byAdding: .weekOfYear, value: -1, to: Date())!
-        var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: lastWeek)
+        var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear, .weekday, .hour, .minute], from: lastWeek)
         components.weekday = 3  // 星期二
         components.hour = 14    // 下午2点
         components.minute = 0
