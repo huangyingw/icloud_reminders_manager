@@ -230,6 +230,11 @@ public class CalendarManager {
             newEvent.recurrenceRules = rules
         }
         
+        // 复制提醒
+        if let alarms = event.alarms {
+            newEvent.alarms = alarms
+        }
+        
         // 保存新事件
         try eventStore.save(newEvent, span: .thisEvent)
         
@@ -309,6 +314,12 @@ public class CalendarManager {
         if let rules = event.recurrenceRules {
             newEvent.recurrenceRules = rules
             logger.info("- 复制了重复规则")
+        }
+        
+        // 复制提醒
+        if let alarms = event.alarms {
+            newEvent.alarms = alarms
+            logger.info("- 复制了提醒设置")
         }
         
         // 保存新事件
